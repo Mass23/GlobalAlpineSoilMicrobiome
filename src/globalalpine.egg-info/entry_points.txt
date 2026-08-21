@@ -1,0 +1,2 @@
+[console_scripts]
+globalalpine = globalalpine.cli:main

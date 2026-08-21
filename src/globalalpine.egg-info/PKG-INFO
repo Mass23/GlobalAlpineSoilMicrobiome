@@ -1,0 +1,44 @@
+Metadata-Version: 2.4
+Name: globalalpine
+Version: 0.1.0
+Summary: Python utilities for alpine soil microbiome environmental predictors
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: numpy>=1.24
+Requires-Dist: pandas>=2.0
+Requires-Dist: requests>=2.31
+Requires-Dist: rasterio>=1.3
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0; extra == "dev"
+
+# GlobalAlpineSoilMicrobiome
+
+Python-first tooling for downloading and sampling geospatial environmental predictors for alpine soil microbiome workflows.
+
+## Scope
+
+- **Python**: all online data gathering, GeoTIFF handling, raster sampling, and covariate extraction from GPS coordinates or point tables.
+- **R**: downstream microbiome analysis, visualization, and statistics.
+
+## Supported data sources
+
+- SoilGrids
+- CHELSA
+- Copernicus DEM-derived terrain products
+
+## Planned capabilities
+
+- Download or reference online raster files
+- Sample rasters at points or within bounding boxes
+- Derive elevation, slope, and aspect from Copernicus DEM
+- Export tidy covariate tables for R
+
+## Project layout
+
+- `src/` for the Python package
+- `tests/` for lightweight checks
+- `README.md` for usage and examples
+
+## Development notes
+
+The repository is intentionally structured so dataset access logic can be separated from raster extraction logic. This makes it easier to adapt to changing URLs, credentials, or local file workflows.
