@@ -12,6 +12,12 @@ import pandas as pd
 import subprocess
 from urllib.parse import urlparse
 
+# Ensure package import works when running scripts from repo root without installing the package
+_repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+src_path = os.path.join(_repo_root, 'src')
+if src_path not in sys.path:
+    sys.path.insert(0, src_path)
+
 from globalalpine import extract_pipeline as ep
 
 
@@ -107,10 +113,19 @@ def main(argv):
         raise ValueError('points CSV must contain lon and lat columns')
 
     depth_col = cfg.get('depth_col', 'depth_cm')
+    # If the configured depth column is missing from the points CSV, disable per-point depth
+    if depth_col and depth_col not in df.columns:
+        print(f"Warning: depth column '{depth_col}' not found in points CSV; per-point depth disabled.")
+        depth_col = None
     chunk_size = cfg.get('chunk_size', 5000)
     dem_window = cfg.get('dem_window', 3)
 
-    parts_dir = 'results/parts'
+    # ensure results directories exist up-front to avoid Snakemake latency/parent-dir races
+    out_dir = os.path.dirname(out_path)
+    if out_dir and not os.path.exists(out_dir):
+        os.makedirs(out_dir, exist_ok=True)
+
+    parts_dir = os.path.join(out_dir, 'parts') if out_dir else 'results/parts'
     os.makedirs(parts_dir, exist_ok=True)
 
     part_files = []
