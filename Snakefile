@@ -71,4 +71,4 @@ rule extract:
     conda:
         "envs/conda_env.yml"
     shell:
-        "python scripts/run_extract.py config/extract_config.yaml {output[0]}"
+        "python scripts/stream_extract.py config/extract_config.yaml {output[0]}"
