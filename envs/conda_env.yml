@@ -1,0 +1,19 @@
+name: globalalpine
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - rasterio
+  - rioxarray
+  - xarray
+  - numpy
+  - pandas
+  - dask
+  - tqdm
+  - geopandas
+  - shapely
+  - fiona
+  - pyproj
+  - rtree
+  - pyyaml
+  - snakemake

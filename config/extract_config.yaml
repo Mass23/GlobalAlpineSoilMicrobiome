@@ -1,0 +1,41 @@
+# Example extraction config. Replace paths with your local COGs or HTTP COG endpoints.
+
+points_csv: "data/points.csv"   # CSV with lon,lat and optional depth_cm
+depth_col: "depth_cm"           # set to null or remove to disable per-point depth
+
+output:
+  path: "results/sampled_soilgrids.parquet"
+
+# SoilGrids variable mapping: var -> band_label -> path
+# Band labels must match: "0-5","5-15","15-30","30-60","60-100","100-200"
+soil_vars:
+  soc:
+    "0-5": "/path/to/soilgrids/soc_0-5.tif"
+    "5-15": "/path/to/soilgrids/soc_5-15.tif"
+    "15-30": "/path/to/soilgrids/soc_15-30.tif"
+    "30-60": "/path/to/soilgrids/soc_30-60.tif"
+    "60-100": "/path/to/soilgrids/soc_60-100.tif"
+    "100-200": "/path/to/soilgrids/soc_100-200.tif"
+  ph:
+    "0-5": "/path/to/soilgrids/ph_0-5.tif"
+    # ... add other ph bands
+
+# CHELSA single-band rasters (BIO1..BIO19, freezing vars, monthly if needed)
+chelsa:
+  bio1: "/path/to/chelsa/BIO1.tif"
+  mean_ann_temp: "/path/to/chelsa/mean_annual_temp.tif"
+  mean_ann_prec: "/path/to/chelsa/mean_annual_prec.tif"
+  freezing_days: "/path/to/chelsa/freezing_days.tif"
+
+# DEM (Copernicus) COG
+dem: "/path/to/copernicus/dem_cog.tif"
+
+# Landcover, NDVI, Snow (single-band COGs)
+landcover:
+  lc: "/path/to/landcover/lc.tif"
+
+ndvi:
+  modis_mean: "/path/to/modis/ndvi_mean.tif"
+
+snow:
+  snow_freq: "/path/to/snow/snow_frequency.tif"
