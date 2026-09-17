@@ -1,0 +1,19 @@
+name: globalalpine-r-chelsa
+channels:
+  - conda-forge
+dependencies:
+  - r-base>=4.2
+  - r-xml2
+  - r-httr
+  - r-terra
+  - r-sf
+  - r-dplyr
+  - r-arrow
+  - r-jsonlite
+  - r-yaml
+  - r-xml2
+  - python=3.10
+  - pip
+
+# Use: conda activate globalalpine-r-chelsa
+# Run: Rscript scripts/chelsa_extract.R
