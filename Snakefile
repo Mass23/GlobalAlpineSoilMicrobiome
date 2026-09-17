@@ -16,17 +16,18 @@ rule download_earth_data:
         [OUTPUT, OUTPUT_R]
     conda:
         CONDA_ENV
-    run:
-        import os, subprocess
-        # ensure log and result dirs exist so Snakemake can observe outputs
-        os.makedirs('logs', exist_ok=True)
-        os.makedirs(os.path.dirname(str(output[0])), exist_ok=True)
-        os.makedirs(os.path.dirname(str(output[1])), exist_ok=True)
-        cmd = ['Rscript', 'scripts/extract_r.R']
-        with open('logs/extract_r.out', 'wb') as out, open('logs/extract_r.err', 'wb') as err:
-            print('Running R extractor; logs -> logs/extract_r.{out,err}')
-            subprocess.check_call(cmd, stdout=out, stderr=err)
-        # verify outputs exist
-        for f in output:
-            if not os.path.exists(str(f)):
-                raise Exception('Expected output not created: %s' % f)
+    shell:
+        """
+        set -euo pipefail
+        mkdir -p logs
+        mkdir -p $(dirname {output[0]})
+        mkdir -p $(dirname {output[1]})
+        echo 'Running R extractor; logs -> logs/extract_r.{out,err}'
+        Rscript scripts/extract_r.R > logs/extract_r.out 2> logs/extract_r.err
+        if [ ! -f {output[0]} ] || [ ! -f {output[1]} ]; then
+            echo 'Expected outputs not created:' {output[0]} {output[1]} >&2
+            ls -la $(dirname {output[0]}) >&2 || true
+            ls -la $(dirname {output[1]}) >&2 || true
+            exit 1
+        fi
+        """
