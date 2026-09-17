@@ -80,10 +80,15 @@ rule install_r_packages:
         os.makedirs(os.path.dirname(output[0]), exist_ok=True)
         open(output[0], 'w').close()
 
+# Build the input list for extract_r: include download targets only if present
+_extract_r_inputs = []
+if DOWNLOAD_TARGETS:
+    _extract_r_inputs.extend(DOWNLOAD_TARGETS_TEMP)
+_extract_r_inputs.append(R_PKG_DONE)
+
 rule extract_r:
     input:
-        DOWNLOAD_TARGETS,
-        R_PKG_DONE
+        _extract_r_inputs
     output:
         OUTPUT_R
     conda:
