@@ -78,40 +78,185 @@ if('depth_cm' %in% names(pts)){
   for(v in vars) out[[paste0('soilgrid_depth_',v)]] <- NA_real_
 }
 
-# CHELSA: prefer rchelsa for bioclim + monthly; fail loudly if monthly extraction not available
-if(requireNamespace('rchelsa', quietly=TRUE)){
-  message('Using rchelsa to extract CHELSA variables (bioclim + monthly)')
-  exports <- getNamespaceExports('rchelsa')
-  # bioclim
-  if('chelsa_bioclim' %in% exports){
-    res_bio <- tryCatch(rchelsa::chelsa_bioclim(points = pts[,c('lon','lat')]), error = function(e) stop('rchelsa::chelsa_bioclim failed: ', e$message))
-    if(is.data.frame(res_bio)){
-      for(nm in names(res_bio)) out[[nm]] <- res_bio[[nm]]
-    } else stop('rchelsa::chelsa_bioclim returned unexpected result; aborting')
-  } else stop('rchelsa installed but function chelsa_bioclim not found; abort')
+# CHELSA: direct streaming from envicloud WSL bucket (monthly per-year + climatology bioclim SSP370 2011-2040)
+library(xml2)
 
-  # monthly variables: try a set of likely function names; require one to exist
-  monthly_fns <- c('chelsa_monthly','chelsa_get_monthly','chelsa_monthly_extract','chelsa_monthly_values','chelsa_monthly_ts')
-  monthly_fn <- NULL
-  for(fn in monthly_fns) if(fn %in% exports){ monthly_fn <- fn; break }
-  if(is.null(monthly_fn)) stop('rchelsa installed but no known monthly extraction function found; aborting. Please check rchelsa documentation or update the package.')
+# Helper: list links in an HTML directory page and return absolute URLs
+list_links <- function(url){
+  res <- httr::GET(url)
+  if(httr::status_code(res) != 200) return(character(0))
+  doc <- tryCatch(xml2::read_html(httr::content(res, as='text', encoding='UTF-8')),
+                  error = function(e) return(character(0)))
+  nodes <- xml2::xml_find_all(doc, './/a')
+  hrefs <- xml2::xml_attr(nodes, 'href')
+  hrefs <- hrefs[!is.na(hrefs)]
+  # make absolute
+  hrefs <- sapply(hrefs, function(h){
+    if(grepl('^https?://', h)) return(h)
+    # handle relative links
+    paste0(sub('/+$','', url), '/', sub('^/+', '', h))
+  }, USE.NAMES = FALSE)
+  hrefs
+}
 
-  monthly_vars <- c('tas','tasmin','tasmax','prec')
-  for(var in monthly_vars){
-    message('Extracting monthly variable: ', var, ' using rchelsa::', monthly_fn)
-    res_month <- tryCatch(do.call(getFromNamespace(monthly_fn, 'rchelsa'), list(points = pts[,c('lon','lat')], variable = var)),
-                          error = function(e) stop('rchelsa monthly extract failed for ', var, ': ', e$message))
-    # Expect res_month to be a data.frame or matrix with 12 columns (months)
-    if(is.data.frame(res_month) || is.matrix(res_month)){
-      # Ensure columns correspond to months; create column names var_01..var_12
-      for(m in seq_len(ncol(res_month))){
-        colname <- sprintf('%s_month%02d', var, m)
-        out[[colname]] <- res_month[,m]
-      }
-    } else stop('rchelsa monthly extract returned unexpected result for ', var)
+# Base URLs
+monthly_base <- 'https://os.unil.cloud.switch.ch/chelsa02/chelsa/global/monthly/'
+bioclim_base <- 'https://os.unil.cloud.switch.ch/chelsa02/chelsa/global/bioclim/'
+
+# For each monthly variable and point, sample the month corresponding to sample_date
+monthly_vars <- c('pr','tas','tasmax','tasmin')
+
+# Helper to get available years for a given variable and month by parsing directory listings
+get_available_years_for_var_month <- function(var, month){
+  years <- integer(0)
+  # list top-level months directory; expect year subdirs
+  top_links <- list_links(monthly_base)
+  # filter links that look like year directories, e.g., '1981/'
+  year_dirs <- unique(gsub('.*/', '', top_links[grepl('/$', top_links)]))
+  year_dirs <- year_dirs[grepl('^\\d{4}/?$', year_dirs)]
+  year_dirs <- as.integer(gsub('/','',year_dirs))
+  year_dirs <- sort(year_dirs)
+  for(y in year_dirs){
+    # list files in year dir
+    year_url <- paste0(monthly_base, y, '/')
+    files <- list_links(year_url)
+    # match files containing var and month (e.g., 'pr_01' or 'tas_07')
+    patt <- paste0(var, '_', sprintf('%02d', month))
+    matches <- files[grepl(patt, files, ignore.case=TRUE) & grepl('\\.tif$', files, ignore.case=TRUE)]
+    if(length(matches)>0) years <- c(years, y)
   }
-} else {
-  stop('rchelsa not installed: installer should have installed it. Aborting because monthly CHELSA variables are required.')
+  years
+}
+
+# Helper to download and sample one TIFF URL for all points
+download_and_sample <- function(url){
+  tmpf <- tempfile(fileext='.tif')
+  message('Downloading ', url)
+  res <- httr::GET(url, httr::write_disk(tmpf, overwrite=TRUE))
+  httr::stop_for_status(res)
+  r <- terra::rast(tmpf)
+  pts_sp <- terra::vect(pts[,c('lon','lat')], geom=c('lon','lat'), crs='EPSG:4326')
+  vals <- terra::extract(r, pts_sp)
+  unlink(tmpf)
+  vals[,2]
+}
+
+# For each monthly var, build a matrix values[point, year_index]
+for(var in monthly_vars){
+  message('Processing monthly variable: ', var)
+  # for each point, get sample year and month
+  sample_years <- as.integer(format(as.Date(pts$sample_date), '%Y'))
+  sample_months <- as.integer(format(as.Date(pts$sample_date), '%m'))
+  # Find available years for the variable/month by scanning top-level yearly dirs
+  # Use union across months from points to limit requests
+  unique_months <- sort(unique(sample_months))
+  available_years <- integer(0)
+  for(m in unique_months){
+    yrs <- get_available_years_for_var_month(var, m)
+    available_years <- sort(unique(c(available_years, yrs)))
+  }
+  if(length(available_years)==0) stop('No available CHELSA monthly TIFFs found for variable ', var, ' on the envicloud host')
+
+  # For each available year, download the file for each month present among points and sample
+  year_vals <- list()
+  year_list <- available_years
+  for(y in year_list){
+    month_vals_for_year <- matrix(NA_real_, nrow=nrow(pts), ncol=1)
+    for(m in unique_months){
+      # attempt to find file URL by listing year dir and matching var_month patt
+      year_url <- paste0(monthly_base, y, '/')
+      files <- list_links(year_url)
+      patt <- paste0(var, '_', sprintf('%02d', m))
+      match_files <- files[grepl(patt, files, ignore.case=TRUE) & grepl('\\.tif$', files, ignore.case=TRUE)]
+      if(length(match_files)==0){
+        # no file for this month in this year
+        next
+      }
+      url <- match_files[1]
+      vals <- tryCatch(download_and_sample(url), error = function(e) rep(NA_real_, nrow(pts)))
+      # store per-point values for this year-month combination
+      # We'll store as list element named y
+      if(is.null(year_vals[[as.character(y)]])) year_vals[[as.character(y)]] <- matrix(NA_real_, nrow=nrow(pts), ncol=length(unique_months))
+      col_idx <- which(unique_months==m)
+      year_vals[[as.character(y)]][,col_idx] <- vals
+    }
+  }
+  # Build matrices per point-year using the month column for each point
+  # Construct data.frame years x points
+  years_vec <- as.integer(names(year_vals))
+  if(length(years_vec)==0) stop('No sampled yearly values for var ', var)
+  years_vec <- sort(years_vec)
+  vals_mat <- matrix(NA_real_, nrow=nrow(pts), ncol=length(years_vec))
+  colnames(vals_mat) <- as.character(years_vec)
+  for(i in seq_along(years_vec)){
+    y <- as.character(years_vec[i])
+    # select col corresponding to each point's month
+    for(pi in seq_len(nrow(pts))){
+      m <- sample_months[pi]
+      col_idx <- which(unique_months==m)
+      if(length(col_idx)==0) next
+      vals_mat[pi,i] <- year_vals[[y]][pi,col_idx]
+    }
+  }
+
+  # For each point, decide value for its sample year
+  result_vec <- numeric(nrow(pts))
+  for(pi in seq_len(nrow(pts))){
+    sy <- sample_years[pi]
+    if(is.na(sy)){
+      result_vec[pi] <- NA_real_; next
+    }
+    if(sy %in% years_vec){
+      result_vec[pi] <- vals_mat[pi, which(years_vec==sy)]
+    } else if(sy < min(years_vec)){
+      # before available range: take earliest available
+      result_vec[pi] <- vals_mat[pi,1]
+    } else {
+      # sy > max(years_vec): extrapolate using linear regression over last up to 10 years
+      recent_idx <- which(years_vec >= (max(years_vec)-9))
+      x <- years_vec[recent_idx]
+      yvals <- vals_mat[pi, recent_idx]
+      valid <- !is.na(yvals)
+      if(sum(valid) >= 2){
+        fit <- lm(yvals[valid] ~ x[valid])
+        pred <- predict(fit, newdata=data.frame(x=sy))
+        result_vec[pi] <- as.numeric(pred)
+      } else {
+        # fallback to last available value
+        result_vec[pi] <- vals_mat[pi, length(years_vec)]
+      }
+    }
+  }
+  # attach result column named var_month
+  colname <- paste0(var, '_sampled')
+  out[[colname]] <- result_vec
+}
+
+# Bioclim SSP370 2011-2040: list bioclim files under bioclim_base and pick the 2011-2040 SSP370 set
+bio_base_candidates <- list_links(bioclim_base)
+# find directories containing 'SSP' or 'ssp'
+ssp_dirs <- bio_base_candidates[grepl('SSP', bio_base_candidates, ignore.case=TRUE)]
+# try to find a dir for SSP370 and 2011-2040
+bioclim_dir <- NULL
+for(d in ssp_dirs){
+  if(grepl('370', d) && grepl('2011', d)) { bioclim_dir <- d; break }
+}
+if(is.null(bioclim_dir)){
+  # fallback: look for any link containing '2011' and '2040'
+  cand <- bio_base_candidates[grepl('2011', bio_base_candidates) & grepl('2040', bio_base_candidates)]
+  if(length(cand)>0) bioclim_dir <- cand[1]
+}
+if(is.null(bioclim_dir)) stop('Could not find bioclim 2011-2040 SSP370 directory on envicloud; aborting')
+
+# list tif files in bioclim_dir and sample each bio variable
+bio_files <- list_links(bioclim_dir)
+bio_files <- bio_files[grepl('\\.tif$', bio_files, ignore.case=TRUE)]
+for(b in 1:19){
+  patt <- paste0('bio', b)
+  f <- bio_files[grepl(patt, bio_files, ignore.case=TRUE)]
+  if(length(f)==0) stop('Missing bioclim file for bio', b, ' in ', bioclim_dir)
+  vals <- download_and_sample(f[1])
+  out[[paste0('bio', b)]] <- vals
 }
 
 # DEM
