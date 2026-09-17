@@ -1,0 +1,11 @@
+name: globalalpine-other
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pandas
+  - numpy
+  - pyarrow
+
+# Use: conda activate globalalpine-other
+# Run: python scripts/other_extract.py

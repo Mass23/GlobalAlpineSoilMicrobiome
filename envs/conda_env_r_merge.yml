@@ -1,0 +1,10 @@
+name: globalalpine-r-merge
+channels:
+  - conda-forge
+dependencies:
+  - r-base>=4.2
+  - r-dplyr
+  - r-arrow
+
+# Use: conda activate globalalpine-r-merge
+# Run: Rscript scripts/merge_extract.R

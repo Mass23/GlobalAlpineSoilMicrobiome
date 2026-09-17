@@ -113,4 +113,10 @@ for var, bands in soil_vars.items():
         results[f'soilgrid_depth_{var}'] = [np.nan]*len(pts)
 
 results.to_csv(OUT, index=False)
-print('Wrote', OUT)
+# write parquet as well for downstream merging
+try:
+    results.to_parquet('results/soilgrids_sampled.parquet', index=False)
+    print('Wrote', OUT, 'and results/soilgrids_sampled.parquet')
+except Exception as e:
+    print('Warning: failed to write parquet:', e, file=sys.stderr)
+    print('Wrote', OUT)

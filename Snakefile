@@ -1,53 +1,69 @@
 configfile: "config/extract_config.yaml"
 
-# Minimal workflow: one rule doing all Earth-data sampling inside R.
-OUTPUT = config["output"]["path"]
-OUTPUT_R = config["output"].get("r_path", "results/sampled_soilgrids_r.csv")
-CONDA_ENV_R = "envs/conda_env_r_geodata-download.yml"
-CONDA_ENV_SOIL = "envs/conda_env_soilgrids.yml"
+# Simplified pipeline: separate rules and one final merge. Each rule points at its env YAML in envs/.
+FINAL_PARQ = config["output"]["path"]
+FINAL_CSV = config["output"].get("r_path", "results/sampled_soilgrids_r.csv")
+
+CONDA_CHELSA = "envs/conda_env_r_chelsa.yml"
+CONDA_SOIL = "envs/conda_env_soilgrids.yml"
+CONDA_OTHER = "envs/conda_env_other.yml"
+CONDA_MERGE = "envs/conda_env_r_merge.yml"
+
+CHELSA_PARQ = 'results/chelsa_climate.parquet'
+CHELSA_CSV = 'results/chelsa_climate.csv'
+SOIL_CSV = 'results/soilgrids_sampled.csv'
+SOIL_PARQ = 'results/soilgrids_sampled.parquet'
+OTHER_CSV = 'results/other_data.csv'
+OTHER_PARQ = 'results/other_data.parquet'
 
 rule all:
     input:
-        OUTPUT, OUTPUT_R, 'results/soilgrids_sampled.csv'
+        FINAL_PARQ, FINAL_CSV
 
-rule soilgrids:
+rule download_chelsa:
     input:
         config['points_csv']
     output:
-        'results/soilgrids_sampled.csv'
+        CHELSA_PARQ, CHELSA_CSV
     conda:
-        CONDA_ENV_SOIL
+        CONDA_CHELSA
     shell:
         """
-        set -euo pipefail
-        mkdir -p $(dirname {output})
+        Rscript scripts/chelsa_extract.R
+        """
+
+rule download_soilgrids:
+    input:
+        config['points_csv']
+    output:
+        SOIL_CSV, SOIL_PARQ
+    conda:
+        CONDA_SOIL
+    shell:
+        """
         python scripts/soilgrids_extract.py
-        if [ ! -f {output} ]; then
-            echo 'Expected output not created:' {output} >&2
-            ls -la $(dirname {output}) >&2 || true
-            exit 1
-        fi
+        """
+
+rule download_other_data:
+    input:
+        config['points_csv']
+    output:
+        OTHER_CSV, OTHER_PARQ
+    conda:
+        CONDA_OTHER
+    shell:
+        """
+        python scripts/other_extract.py
         """
 
 rule download_earth_data:
     input:
-        config['points_csv']
+        CHELSA_PARQ, CHELSA_CSV, SOIL_CSV, SOIL_PARQ, OTHER_CSV, OTHER_PARQ
     output:
-        [OUTPUT, OUTPUT_R]
+        FINAL_PARQ, FINAL_CSV
     conda:
-        CONDA_ENV_R
+        CONDA_MERGE
     shell:
         """
-        set -euo pipefail
-        mkdir -p logs
-        mkdir -p $(dirname {output[0]})
-        mkdir -p $(dirname {output[1]})
-        echo 'Running R extractor; logs -> logs/extract_r.out and logs/extract_r.err'
-        Rscript scripts/extract.R
-        if [ ! -f {output[0]} ] || [ ! -f {output[1]} ]; then
-            echo 'Expected outputs not created:' {output[0]} {output[1]} >&2
-            ls -la $(dirname {output[0]}) >&2 || true
-            ls -la $(dirname {output[1]}) >&2 || true
-            exit 1
-        fi
+        Rscript scripts/merge_extract.R
         """

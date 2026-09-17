@@ -8,6 +8,7 @@ dependencies:
   - numpy
   - pandas
   - pyyaml
+  - pyarrow
   - pip
 
 # Use: conda activate globalalpine-soilgrids
