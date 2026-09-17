@@ -67,7 +67,7 @@ for var, bands in soil_vars.items():
     band_vals = np.vstack([sample_raster(u, lon, lat) if u else np.full(len(lon), np.nan) for u in urls])
     # compute nodepth (0-30 cm) thickness-weighted average of first 3 bands
     w = np.array(thicknesses[:3]) / 30.0
-    nodepth = np.nansum(band_vals[:3,:] * w[:,None], axis=0) / np.nansum(np.where(np.isnan(band_vals[:3,:]),0,w) ,axis=0)
+    nodepth = np.nansum(band_vals[:3,:] * w[:,None], axis=0) / np.nansum(np.where(np.isnan(band_vals[:3,:]), 0, w[:,None]) ,axis=0)
     # where all three are nan, result should be nan
     nodepth[np.all(np.isnan(band_vals[:3,:]),axis=0)] = np.nan
     results[f'soilgrid_nodepth_{var}'] = nodepth
