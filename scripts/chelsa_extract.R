@@ -11,6 +11,7 @@ suppressPackageStartupMessages({
   library(sf)
   library(dplyr)
   library(arrow)
+  library(httr)
 })
 
 pts <- read.csv('data/points.csv', stringsAsFactors = FALSE)
@@ -23,39 +24,46 @@ models <- c('GFDL-ESM4','IPSL-CM6A-LR','MPI-ESM1-2-HR','MRI-ESM2-0','UKESM1-0-LL
 
 bucket_base <- 'https://os.unil.cloud.switch.ch/chelsa02/'
 
-# helper: list bucket prefix using S3 XML listing
-list_chelsa <- function(prefix){
-  # returns list(folders=..., files=...)
-  url <- bucket_base
-  resp <- try(httr::GET(url, query = list(prefix = prefix, delimiter = '/'), timeout(30)), silent = TRUE)
-  if(inherits(resp, 'try-error')) stop(paste('Failed to list bucket prefix:', prefix, resp))
-  if(httr::status_code(resp) != 200) stop(paste('Non-200 listing for prefix', prefix, 'status', httr::status_code(resp)))
-  txt <- httr::content(resp, as='text', encoding='UTF-8')
-  xml <- xml2::read_xml(txt)
-  ns <- xml2::xml_ns(xml)
-  prefixes <- xml2::xml_text(xml2::xml_find_all(xml, './/d1:CommonPrefixes/d1:Prefix', ns))
-  keys <- xml2::xml_text(xml2::xml_find_all(xml, './/d1:Contents/d1:Key', ns))
-  return(list(folders = prefixes, files = keys))
+# helpers to construct /vsicurl/ paths
+chelsa_monthly_url <- function(var, year, month){
+  mm <- sprintf('%02d', as.integer(month))
+  sprintf('/vsicurl/https://os.unil.cloud.switch.ch/chelsa02/chelsa/global/monthly/%s/%d/CHELSA_%s_%s_%d_V.2.1.tif',
+          var, as.integer(year), var, mm, as.integer(year))
 }
 
-# construct /vsicurl/ path for a given key
-vsicurl_for_key <- function(key){
-  paste0('/vsicurl/', bucket_base, key)
+chelsa_bioclim_future_url <- function(bio, period, gcm, ssp){
+  bio_num <- sprintf('%02d', as.integer(bio))
+  gcm_lower <- tolower(gcm)
+  sprintf('/vsicurl/https://os.unil.cloud.switch.ch/chelsa02/chelsa/global/bioclim/bio%s/%s/%s/%s/CHELSA_%s_%s_bio%s_%s_V.2.1.tif',
+          bio_num, period, gcm, ssp, gcm_lower, ssp, bio_num, period)
 }
 
+chelsa_bioclim_hist_url <- function(bio){
+  bio_num <- sprintf('%02d', as.integer(bio))
+  sprintf('/vsicurl/https://os.unil.cloud.switch.ch/chelsa02/chelsa/global/bioclim/bio%s/1981-2010/CHELSA_bio%s_1981-2010_V.2.1.tif',
+          bio_num, bio_num)
+}
+
+# sample helper: accept /vsicurl/... path or https; ensure /vsicurl/ for terra
 sample_one_raster <- function(url, pts_df){
-  # url is expected to be a /vsicurl/... path or full https
-  # if it starts with /vsicurl/, leave as is; else ensure https
-  if(grepl('^/vsicurl/', url)) {
+  if(grepl('^/vsicurl/', url)){
     fetch_url <- url
-  } else if(!grepl('^https?://', url)) {
-    fetch_url <- paste0('/vsicurl/', bucket_base, url)
-  } else {
+    # check underlying https exists
+    https_url <- sub('^/vsicurl/', '', url)
+  } else if(grepl('^https?://', url)){
     fetch_url <- paste0('/vsicurl/', url)
+    https_url <- url
+  } else {
+    stop('sample_one_raster expects /vsicurl/ or https URL')
   }
-  # Try to open with terra using vsicurl streaming
-  r <- try(terra::rast(fetch_url), silent=TRUE)
-  if(inherits(r,'try-error')) stop(paste('Failed to open raster URL with terra::rast:', fetch_url, '-', r))
+  # HEAD-check to avoid HTML error pages
+  h <- try(httr::HEAD(https_url, httr::timeout(30)), silent = TRUE)
+  if(inherits(h, 'try-error')) stop(paste('HEAD failed for', https_url, h))
+  if(httr::status_code(h) != 200) stop(paste('Non-200 for', https_url, httr::status_code(h)))
+  ct <- tolower(httr::headers(h)[['content-type']])
+  if(!is.null(ct) && grepl('html', ct)) stop(paste('URL returned HTML:', https_url))
+  r <- try(terra::rast(fetch_url), silent = TRUE)
+  if(inherits(r, 'try-error')) stop(paste('terra::rast failed for', fetch_url, r))
   v <- terra::vect(pts_df[,c('lon','lat')], geom = c('lon','lat'), crs = 'EPSG:4326')
   res <- terra::extract(r, v)
   return(res[,2])
@@ -63,56 +71,24 @@ sample_one_raster <- function(url, pts_df){
 
 out <- pts
 
-# Monthly variables: sample file for point's sample_date year/month (strict - discover via listing)
+# Monthly variables: construct exact /vsicurl/ URLs per variable/year/month and sample
 for(var in monthly_vars){
   vals <- numeric(nrow(pts))
-  # cache per year-month
-  cache_urls <- list()
   for(i in seq_len(nrow(pts))){
-    yr <- format(pts$sample_date[i], '%Y')
-    mm <- format(pts$sample_date[i], '%m')
-    key_expected <- paste0('chelsa/global/monthly/', var, '/', yr, '/CHELSA_', var, '_', mm, '_', yr, '_V.2.1.tif')
-    if(!is.null(cache_urls[[key_expected]])){
-      url <- cache_urls[[key_expected]]
-    } else {
-      # list the prefix to find exact key
-      lst <- list_chelsa(paste0('chelsa/global/monthly/', var, '/', yr, '/'))
-      files <- lst$files
-      match_key <- files[basename(files) == basename(key_expected)]
-      if(length(match_key) == 0){
-        stop(paste('Expected monthly file not found in bucket for', var, yr, mm, 'expected key', key_expected))
-      }
-      url <- vsicurl_for_key(match_key[1])
-      cache_urls[[key_expected]] <- url
-    }
+    yr <- as.integer(format(pts$sample_date[i], '%Y'))
+    mm <- as.integer(format(pts$sample_date[i], '%m'))
+    url <- chelsa_monthly_url(var, yr, mm)
+    # sample_one_raster accepts /vsicurl/ URL
     vals[i] <- sample_one_raster(url, pts[i, , drop = FALSE])
   }
   out[[paste0(var, '_sampled')]] <- vals
 }
 
-# Bioclim climatologies: discover available CHELSA_bio files and sample (prefer 1981-2010)
+# Bioclim climatologies: use historical 1981-2010 climatologies (constructed path) and sample
 for(b in bios){
-  # search for keys under chelsa/global/bioclim/ that contain the bio name
-  lst_top <- list_chelsa('chelsa/global/bioclim/')
-  all_files <- lst_top$files
-  # if nothing at top, try to walk folders
-  if(length(all_files) == 0){
-    # drill into folders
-    for(pref in lst_top$folders){
-      sub <- list_chelsa(pref)
-      all_files <- c(all_files, sub$files)
-    }
-  }
-  pattern <- paste0('CHELSA_', b, '_')
-  candidates <- all_files[grepl(pattern, basename(all_files), ignore.case = FALSE)]
-  if(length(candidates) == 0){
-    stop(paste('No bioclim files found for', b))
-  }
-  # prefer 1981-2010 if present
-  prefer_idx <- grep('1981-2010', candidates)
-  if(length(prefer_idx)>0) chosen <- candidates[prefer_idx[1]] else chosen <- candidates[1]
-  url <- vsicurl_for_key(chosen)
-  # sample the single-band climatology raster for all points
+  # b is like 'bio01'.. convert to number
+  bio_num <- as.integer(sub('bio', '', b))
+  url <- chelsa_bioclim_hist_url(bio_num)
   vals <- sample_one_raster(url, pts)
   out[[b]] <- vals
 }
