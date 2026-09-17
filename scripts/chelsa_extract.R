@@ -41,20 +41,20 @@ bucket_base <- 'https://os.unil.cloud.switch.ch/chelsa02/'
 # helpers to construct /vsicurl/ paths
 chelsa_monthly_url <- function(var, year, month){
   mm <- sprintf('%02d', as.integer(month))
-  sprintf('/vsicurl/https://os.unil.cloud.switch.ch/chelsa02/chelsa/global/monthly/%s/%d/CHELSA_%s_%s_%d_V.2.1.tif',
+  sprintf('https://os.unil.cloud.switch.ch/chelsa02/chelsa/global/monthly/%s/%d/CHELSA_%s_%s_%d_V.2.1.tif',
           var, as.integer(year), var, mm, as.integer(year))
 }
 
 chelsa_bioclim_future_url <- function(bio, period, gcm, ssp){
   bio_num <- sprintf('%02d', as.integer(bio))
   gcm_lower <- tolower(gcm)
-  sprintf('/vsicurl/https://os.unil.cloud.switch.ch/chelsa02/chelsa/global/bioclim/bio%s/%s/%s/%s/CHELSA_%s_%s_bio%s_%s_V.2.1.tif',
+  sprintf('https://os.unil.cloud.switch.ch/chelsa02/chelsa/global/bioclim/bio%s/%s/%s/%s/CHELSA_%s_%s_bio%s_%s_V.2.1.tif',
           bio_num, period, gcm, ssp, gcm_lower, ssp, bio_num, period)
 }
 
 chelsa_bioclim_hist_url <- function(bio){
   bio_num <- sprintf('%02d', as.integer(bio))
-  sprintf('/vsicurl/https://os.unil.cloud.switch.ch/chelsa02/chelsa/global/bioclim/bio%s/1981-2010/CHELSA_bio%s_1981-2010_V.2.1.tif',
+  sprintf('https://os.unil.cloud.switch.ch/chelsa02/chelsa/global/bioclim/bio%s/1981-2010/CHELSA_bio%s_1981-2010_V.2.1.tif',
           bio_num, bio_num)
 }
 
