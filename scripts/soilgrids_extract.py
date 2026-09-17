@@ -42,13 +42,26 @@ def sample_raster(url, lon, lat):
     try:
         with rasterio.Env():
             with rasterio.open(url) as src:
-                # ensure same crs, use src.sample on lon/lat in src CRS
-                # src.sample expects [(x,y), ...] in src CRS (likely EPSG:4326 here)
                 coords = list(zip(lon, lat))
-                vals = [v[0] if v is not None else np.nan for v in src.sample(coords)]
-                return np.array(vals, dtype=float)
+                raw_vals = []
+                for v in src.sample(coords):
+                    try:
+                        val = float(v[0])
+                    except Exception:
+                        val = np.nan
+                    raw_vals.append(val)
+                arr = np.array(raw_vals, dtype=float)
+                # mask nodata values if defined
+                nod = src.nodata
+                if nod is not None:
+                    arr[arr == nod] = np.nan
+                # also mask common sentinel values (SoilGrids sometimes uses 32767/32768)
+                sentinels = [32767, 32768, -32768, 2147483647]
+                # allow small float tolerances
+                for s in sentinels:
+                    arr[np.isclose(arr, float(s), equal_nan=False)] = np.nan
+                return arr
     except Exception as e:
-        # return nans if cannot sample
         print(f'Warning: failed to open/sample {url}: {e}', file=sys.stderr)
         return np.full(len(lon), np.nan)
 
