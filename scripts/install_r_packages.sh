@@ -12,10 +12,7 @@ Rscript -e "if(!'remotes' %in% installed.packages()[,'Package']) install.package
 # Install CopernicusDEM from CRAN (required for DEM helpers)
 Rscript -e "install.packages('CopernicusDEM', repos='https://cloud.r-project.org')"
 
-# Install rchelsa from GitLab (karger/rchelsa)
-Rscript -e "remotes::install_gitlab('karger/rchelsa')"
-
 cat <<'MSG'
-Installed CRAN packages: CopernicusDEM and GitLab package rchelsa
+Installed CRAN packages: CopernicusDEM
 If you need additional packages, add them to this script.
 MSG
