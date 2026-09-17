@@ -25,10 +25,23 @@ rule install_r_packages:
 
 rule download_earth_data:
     input:
-        R_PKG_DONE
+        R_PKG_DONE, config['points_csv']
     output:
         [OUTPUT, OUTPUT_R]
     conda:
         CONDA_ENV
-    shell:
-        "Rscript scripts/extract_r.R"
+    run:
+        import os, subprocess
+        # ensure log and result dirs exist so Snakemake can observe outputs
+        os.makedirs('logs', exist_ok=True)
+        os.makedirs(os.path.dirname(str(output[0])), exist_ok=True)
+        os.makedirs(os.path.dirname(str(output[1])), exist_ok=True)
+        cmd = ['Rscript', 'scripts/extract_r.R']
+        with open('logs/extract_r.out', 'wb') as out, open('logs/extract_r.err', 'wb') as err:
+            print('Running R extractor; logs -> logs/extract_r.{out,err}')
+            subprocess.check_call(cmd, stdout=out, stderr=err)
+        # verify outputs exist
+        for f in output:
+            if not os.path.exists(str(f)):
+                raise Exception('Expected output not created: %s' % f)
+
