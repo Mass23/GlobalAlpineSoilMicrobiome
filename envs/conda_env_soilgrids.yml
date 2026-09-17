@@ -1,0 +1,14 @@
+name: globalalpine-soilgrids
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - rasterio
+  - gdal
+  - numpy
+  - pandas
+  - pyyaml
+  - pip
+
+# Use: conda activate globalalpine-soilgrids
+# Run: python scripts/soilgrids_extract.py
