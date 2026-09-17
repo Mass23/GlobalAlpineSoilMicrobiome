@@ -130,10 +130,15 @@ if(have_copdem){
   out$dem_elevation <- NA_real_
 }
 
+# Determine output path (allow Snakemake to pass it as first arg)
+args <- commandArgs(trailingOnly = TRUE)
+out_path <- if(length(args) >= 1) args[[1]] else 'results/sampled_soilgrids_r.csv'
+
 # Print resulting table
 print(out)
 
-# Save to results
-if(!dir.exists('results')) dir.create('results')
-write.csv(out, 'results/sampled_soilgrids_r.csv', row.names=FALSE)
-message('Wrote results/sampled_soilgrids_r.csv')
+# Save to requested output path
+out_dir <- dirname(out_path)
+if(!dir.exists(out_dir)) dir.create(out_dir, recursive=TRUE)
+write.csv(out, out_path, row.names=FALSE)
+message(sprintf('Wrote %s', out_path))

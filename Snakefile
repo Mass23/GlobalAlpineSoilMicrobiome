@@ -89,4 +89,4 @@ rule extract_r:
     conda:
         "envs/conda_env_r_geodata.yml"
     shell:
-        "Rscript scripts/extract_r.R"
+        "Rscript scripts/extract_r.R {output[0]}"
