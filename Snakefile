@@ -6,8 +6,8 @@ OUTPUT_R = config["output"].get("r_path", "results/sampled_soilgrids_r.csv")
 CONDA_ENV = "envs/conda_env_r_geodata-download.yml"
 
 rule all:
-    output:
-        [OUTPUT, OUTPUT_R]
+    input:
+        rules.download_earth_data.output
 
 R_PKG_DONE = 'envs/.r_packages_installed'
 
