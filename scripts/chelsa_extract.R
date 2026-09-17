@@ -18,9 +18,17 @@ pts <- read.csv('data/points.csv', stringsAsFactors = FALSE)
 if(!all(c('site','lon','lat','sample_date') %in% names(pts))) stop("data/points.csv must contain columns: site, lon, lat, sample_date")
 pts$sample_date <- as.Date(pts$sample_date)
 
-monthly_vars <- c('pet','pr','tas','tasmax','tasmin','rsds','sfcWind','hurs','clt','cmi','ps','spei12','spi12','prec','tz','vpd')
+variables <- c(sprintf('bio%02d', 1:19), 'fcf','fgd','scd','pr','tas','tasmin','tasmax')
+monthly_vars <- c('pr', 'tas', 'tasmin', 'tasmax')
+# bios variables are a subset of variables
 bios <- sprintf('bio%02d', 1:19)
-models <- c('GFDL-ESM4','IPSL-CM6A-LR','MPI-ESM1-2-HR','MRI-ESM2-0','UKESM1-0-LL')
+# models/institutions for projections (kept for future-proofing)
+institutions <- c('UKESM1-0-LL','GFDL-ESM4','IPSL-CM6A-LR','MPI-ESM1-2-HR','MRI-ESM2-0')
+
+# scaling and offsets (from user's previous code)
+vars_scales <- setNames(sapply(variables, function(v) if(grepl('^bio', v) || v %in% monthly_vars) 0.1 else 1), variables)
+offsets_temp <- c(sprintf('bio%02d', c(10,11,1,5,6,8,9)), 'tas','tasmin','tasmax')
+vars_offsets <- setNames(sapply(variables, function(v) if(v %in% offsets_temp) -273.15 else 0), variables)
 
 bucket_base <- 'https://os.unil.cloud.switch.ch/chelsa02/'
 
@@ -81,7 +89,10 @@ for(var in monthly_vars){
     # sample_one_raster accepts /vsicurl/ URL
     vals[i] <- sample_one_raster(url, pts[i, , drop = FALSE])
   }
-  out[[paste0(var, '_sampled')]] <- vals
+  # apply scale & offset
+  scale_val <- as.numeric(vars_scales[[var]])
+  offset_val <- as.numeric(vars_offsets[[var]])
+  out[[paste0(var, '_sampled')]] <- as.numeric(vals) * scale_val + offset_val
 }
 
 # Bioclim climatologies: use historical 1981-2010 climatologies (constructed path) and sample
@@ -90,7 +101,10 @@ for(b in bios){
   bio_num <- as.integer(sub('bio', '', b))
   url <- chelsa_bioclim_hist_url(bio_num)
   vals <- sample_one_raster(url, pts)
-  out[[b]] <- vals
+  # apply scale & offset
+  scale_val <- as.numeric(vars_scales[[b]])
+  offset_val <- as.numeric(vars_offsets[[b]])
+  out[[b]] <- as.numeric(vals) * scale_val + offset_val
 }
 
 # Write outputs (CSV + Parquet)
