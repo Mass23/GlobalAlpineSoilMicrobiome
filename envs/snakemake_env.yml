@@ -1,0 +1,13 @@
+name: globalalpine-snakemake
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - snakemake
+  - mamba
+  - pip
+
+# Notes:
+# - Create with: mamba env create -f envs/snakemake_env.yml
+# - Activate with: conda activate globalalpine-snakemake
+# - Then run snakemake --use-conda --cores 1 (the Snakefile references envs/conda_env.yml for the R env)
