@@ -1,14 +1,17 @@
 # GlobalAlpineSoilMicrobiome
 
-Python-first tooling for downloading and sampling geospatial environmental
-predictors for alpine soil microbiome workflows.
+R-first tooling for downloading and sampling geospatial environmental
+predictors for alpine soil microbiome workflows. Extraction and raster
+sampling are implemented in R (soilDB, terra, CopernicusDEM), with
+exports consumable from Python if needed.
 
 ## Scope
 
-- **Python**: all online data gathering, GeoTIFF handling, raster sampling,
-  and covariate extraction from GPS coordinates or point tables.
-- **R**: downstream microbiome analysis, visualisation, and statistics
-  (reads covariate tables exported by this package).
+- **R**: primary tools for online data gathering, sampling SoilGrids and
+  CHELSA (via soilDB and terra), DEM retrieval (CopernicusDEM), and
+  per-point covariate extraction.
+- **Python**: optional utilities and downstream workflows (legacy); kept
+  for compatibility but extraction workflow is R-based.
 
 ## Supported data sources
 
@@ -20,16 +23,27 @@ predictors for alpine soil microbiome workflows.
 
 ## Installation
 
+Create the R-focused conda environment and run the R extractor script:
+
 ```bash
-pip install -e ".[dev]"
+# Using mamba (recommended)
+mamba env create -f envs/conda_env.yml
+conda activate globalalpine-r
+Rscript scripts/extract_r.R
 ```
 
-Requires Python ≥ 3.10.  Runtime dependencies: `numpy`, `pandas`, `requests`,
-`rasterio`.
+Ensure required R packages are installed in the conda env before running. Example:
+
+```bash
+conda activate globalalpine-r
+mamba install -n globalalpine-r -c conda-forge r-soildb r-terra r-sf r-httr r-jsonlite snakemake
+# If CopernicusDEM is not available via conda, install from CRAN inside the env:
+# R -e "install.packages('CopernicusDEM', repos='https://cloud.r-project.org')"
+```
 
 ## Quick start
 
-### Single point
+### Single point (R)
 
 ```python
 from globalalpine import (

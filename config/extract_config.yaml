@@ -5,6 +5,7 @@ depth_col: "depth_cm"           # set to null or remove to disable per-point dep
 
 output:
   path: "results/sampled_soilgrids.parquet"
+  r_path: "results/sampled_soilgrids_r.csv"
 
 # SoilGrids variable mapping: var -> band_label -> path
 # Band labels must match: "0-5","5-15","15-30","30-60","60-100","100-200"
@@ -29,38 +30,45 @@ soil_vars:
 # Using the ENVICloud / OS Zurich mirror for CHELSA v2.1 climatologies (SCD = snow cover days)
 chelsa:
   scd_1981_2010: "https://os.zhdk.cloud.switch.ch/chelsav2/GLOBAL/climatologies/1981-2010/bio/CHELSA_scd_1981-2010_V.2.1.tif"
-  bio1_1981_2010: "https://os.zhdk.cloud.switch.ch/chelsav2/GLOBAL/climatologies/1981-2010/bio/CHELSA_bio01_1981-2010_V.2.1.tif"
-  # add other CHELSA bio variables as needed, pattern: CHELSA_bioXX_1981-2010_V.2.1.tif
+  # add other CHELSA bio variables as needed; populate only verified URLs
 
-# DEM (Copernicus) COG - recommend Copernicus DEM or SRTM on a cloud-hosted COG
-dem: "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/0/0/0.png"  # placeholder; replace with official Copernicus/CopDEM COG URL
+# DEM (Copernicus) COG - recommend using Microsoft Planetary Computer STAC to resolve Copernicus DEM or SRTM COGs
+# The extractor can resolve STAC collections to concrete COG asset URLs at runtime; provide collection + asset keys here.
+# Example resolver behavior: query the Planetary Computer STAC for an item covering the point/date, then use the item's asset href (HTTP COG) for sampling.
 
-# Landcover, NDVI, Snow (single-band COGs)
+dem:
+  source: "planetary_computer"
+  collection: "copernicus-dem"   # Planetary Computer collection id for Copernicus DEM on PC
+  asset: "DEM"                   # asset key to use from STAC item
+  description: "Resolve Copernicus DEM COG via Planetary Computer STAC; fall back to SRTM if not available"
+
+# Landcover (ESA WorldCover 10m) via Planetary Computer STAC
 landcover:
-  lc: "https://example.com/landcover/lc_cog.tif"  # replace with preferred landcover COG
+  source: "planetary_computer"
+  collection: "esa-worldcover"   # ESA WorldCover collection on Planetary Computer
+  asset: "map"                   # asset key containing the COG
+  description: "ESA WorldCover 10m (2020) COG asset 'map' available via STAC"
 
-# NDVI: placeholder for MODIS/PROBAV/GLASS COGs. Planetary Computer hosts MODIS COGs (use STAC to obtain HTTP URLs).
+# NDVI: compute from Sentinel-2 L2A bands (B04 = red, B08 = nir) available as COGs on Planetary Computer
+# The extractor can request both band assets and compute NDVI = (B08 - B04) / (B08 + B04)
 ndvi:
-  modis_16d: "https://planetarycomputer.microsoft.com/collection/modis-vegetation-index/items/<date>-<tile>.tif"  # STAC/placeholder
+  source: "planetary_computer"
+  collection: "sentinel-2-l2a"
+  assets:
+    red: "B04"
+    nir: "B08"
+  description: "Compute NDVI from Sentinel-2 L2A COG assets (B04, B08) via STAC item assets. Use date selection or latest available per-point as needed."
 
+# Snow: keep CHELSA SCD as a canonical climatology; for near-real-time snow use MODIS/Terra snow products via Planetary Computer STAC
 snow:
   chelsa_scd: "https://os.zhdk.cloud.switch.ch/chelsav2/GLOBAL/climatologies/1981-2010/bio/CHELSA_scd_1981-2010_V.2.1.tif"
-  # For time-series or SWE use CHELSA_swe or other sources
-chelsa:
-  bio1: "/path/to/chelsa/BIO1.tif"
-  mean_ann_temp: "/path/to/chelsa/mean_annual_temp.tif"
-  mean_ann_prec: "/path/to/chelsa/mean_annual_prec.tif"
-  freezing_days: "/path/to/chelsa/freezing_days.tif"
+  planetary:
+    source: "planetary_computer"
+    collection: "modis-snow"   # MODIS snow collection on Planetary Computer (time-series/tiles)
+    asset: "snow_cover"        # asset key to use for MODIS snow COGs
+    description: "Use CHELSA SCD for climatology; use MODIS snow assets for time-series when required via STAC"
 
-# DEM (Copernicus) COG
-dem: "/path/to/copernicus/dem_cog.tif"
-
-# Landcover, NDVI, Snow (single-band COGs)
-landcover:
-  lc: "/path/to/landcover/lc.tif"
-
-ndvi:
-  modis_mean: "/path/to/modis/ndvi_mean.tif"
-
-snow:
-  snow_freq: "/path/to/snow/snow_frequency.tif"
+# Notes for the extractor:
+# - For entries with source: planetary_computer, the extractor should use the Planetary Computer STAC endpoint
+#   (or pystac-client) to find the nearest STAC item covering the point (and date if time-series), then use the named asset href (HTTP COG) for rasterio sampling.
+# - This keeps canonical sources consistent and avoids hardcoding single-item URLs; if you prefer hard-coded example COGs I can expand these to concrete sample hrefs.

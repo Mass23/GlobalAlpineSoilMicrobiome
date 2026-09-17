@@ -122,6 +122,7 @@ def extract_soilgrids_for_points(
     result = df.copy()
 
     for var, band_map in variables_to_band_paths.items():
+        # Build ordered full band path list (may include more bands than we sample initially)
         band_paths = []
         for label in band_labels:
             if label not in band_map:
@@ -131,17 +132,73 @@ def extract_soilgrids_for_points(
         depth_values = np.full(n, np.nan, dtype=float)
         nodepth_values = np.full(n, np.nan, dtype=float)
 
+        # We only need the first three bands to compute the 0-30cm thickness-weighted average and
+        # to perform interpolation for depths <= 30 cm. For depths > 30 cm we'll fetch additional
+        # bands up to the band that contains the requested depth.
+        initial_band_count = 3
+        first_paths = band_paths[:initial_band_count]
+        first_tops = tops[:initial_band_count]
+        first_bottoms = bottoms[:initial_band_count]
+        first_mids = mids[:initial_band_count]
+
         for start in tqdm(range(0, n, chunk_size), desc=f"sampling {var}"):
             end = min(n, start + chunk_size)
             coords_chunk = coords[start:end]
-            sampled = sample_band_rasters(coords_chunk, band_paths)
+            k = end - start
+            # Sample the first (0-5,5-15,15-30) bands for the whole chunk
+            sampled_first = sample_band_rasters(coords_chunk, first_paths)  # shape (k, initial_band_count)
 
-            for i in range(sampled.shape[0]):
-                vals = sampled[i, :]
-                if depth_col:
-                    d = depths[start + i]
-                    depth_values[start + i] = compute_depth_interp_single(vals, mids, d)
-                nodepth_values[start + i] = thickness_weighted_avg_0_30(vals, tops, bottoms)
+            # Precompute nodepth (0-30 cm weighted avg) from the first three bands
+            for i in range(k):
+                vals_first = sampled_first[i, :]
+                nodepth_values[start + i] = thickness_weighted_avg_0_30(vals_first, first_tops, first_bottoms)
+
+            # Determine which points need extra bands because depth > 30 cm
+            if depth_col:
+                depths_chunk = depths[start:end]
+                # compute required highest band index (0-based) for each depth; if nan -> -1
+                required_idx = np.full(k, -1, dtype=int)
+                for i in range(k):
+                    d = depths_chunk[i]
+                    if np.isnan(d):
+                        required_idx[i] = -1
+                        continue
+                    # if depth <= 30, we can interpolate using first three bands
+                    if d <= first_bottoms[-1]:
+                        # interpolate from first three
+                        try:
+                            depth_values[start + i] = compute_depth_interp_single(sampled_first[i, :], first_mids, d)
+                        except Exception:
+                            depth_values[start + i] = np.nan
+                        required_idx[i] = -1
+                    else:
+                        # find smallest band index j such that bottoms[j] >= d
+                        j_candidates = np.where(bottoms >= d)[0]
+                        if j_candidates.size > 0:
+                            j = int(j_candidates[0])
+                        else:
+                            j = len(bottoms) - 1
+                        required_idx[i] = j
+
+                # If any required_idx > initial_band_count-1, sample additional bands up to the max needed
+                if np.any(required_idx > (initial_band_count - 1)):
+                    max_needed = int(required_idx.max())
+                    extra_paths = band_paths[initial_band_count : max_needed + 1]
+                    sampled_extra = sample_band_rasters(coords_chunk, extra_paths)  # shape (k, extra_m)
+                    # For each point that needs extra bands, build the combined values and interpolate
+                    for i in range(k):
+                        j = required_idx[i]
+                        if j <= (initial_band_count - 1) or j == -1:
+                            continue
+                        # number of extra bands needed for this point
+                        num_extra = j - (initial_band_count - 1)
+                        extra_vals = sampled_extra[i, :num_extra]
+                        combined_vals = np.concatenate([sampled_first[i, :], extra_vals])
+                        combined_mids = mids[: (initial_band_count + num_extra) ]
+                        try:
+                            depth_values[start + i] = compute_depth_interp_single(combined_vals, combined_mids, depths_chunk[i])
+                        except Exception:
+                            depth_values[start + i] = np.nan
 
         result[f"soilgrid_depth_{var}"] = depth_values
         result[f"soilgrid_nodepth_{var}"] = nodepth_values

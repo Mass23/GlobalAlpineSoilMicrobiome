@@ -1,6 +1,7 @@
 configfile: "config/extract_config.yaml"
 
 OUTPUT = config["output"]["path"]
+OUTPUT_R = config["output"].get("r_path", "results/sampled_soilgrids_r.csv")
 
 # Collect remote URLs from config and map to local tile paths (data/tiles/{basename}).
 # Downloads are marked as temporary so Snakemake will remove them after the workflow.
@@ -48,7 +49,7 @@ DOWNLOAD_TARGETS_TEMP = temp(DOWNLOAD_TARGETS) if DOWNLOAD_TARGETS else []
 
 rule all:
     output:
-        OUTPUT
+        OUTPUT_R
 
 rule download_tiles:
     # outputs are temporary tiles
@@ -63,12 +64,12 @@ rule download_tiles:
             print(f"Downloading {url} -> {out}")
             subprocess.check_call(["curl", "-fSL", "--retry", "3", "-o", out, url])
 
-rule extract:
+rule extract_r:
     input:
         DOWNLOAD_TARGETS
     output:
-        OUTPUT
+        OUTPUT_R
     conda:
         "envs/conda_env.yml"
     shell:
-        "python scripts/stream_extract.py config/extract_config.yaml {output[0]}"
+        "Rscript scripts/extract_r.R"

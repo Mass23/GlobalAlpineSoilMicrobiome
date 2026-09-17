@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 """Runner script used by Snakemake to execute the extraction pipeline.
 
 Usage:
