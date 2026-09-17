@@ -51,6 +51,9 @@ rule all:
     output:
         OUTPUT_R
 
+# Marker file to indicate CRAN-only R packages have been installed into the R env
+R_PKG_DONE = 'envs/.r_packages_installed'
+
 rule download_tiles:
     # outputs are temporary tiles
     output:
@@ -64,9 +67,21 @@ rule download_tiles:
             print(f"Downloading {url} -> {out}")
             subprocess.check_call(["curl", "-fSL", "--retry", "3", "-o", out, url])
 
+rule install_r_packages:
+    output:
+        R_PKG_DONE
+    run:
+        import subprocess, os
+        # Run the installer script in the repo root; it installs CRAN-only R packages into the active env.
+        print('Installing CRAN-only R packages...')
+        subprocess.check_call(['bash', 'scripts/install_r_packages.sh'])
+        os.makedirs(os.path.dirname(output[0]), exist_ok=True)
+        open(output[0], 'w').close()
+
 rule extract_r:
     input:
-        DOWNLOAD_TARGETS
+        DOWNLOAD_TARGETS,
+        R_PKG_DONE
     output:
         OUTPUT_R
     conda:
