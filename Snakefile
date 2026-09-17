@@ -70,10 +70,12 @@ rule download_tiles:
 rule install_r_packages:
     output:
         R_PKG_DONE
+    conda:
+        "envs/conda_env_r_geodata.yml"
     run:
         import subprocess, os
-        # Run the installer script in the repo root; it installs CRAN-only R packages into the active env.
-        print('Installing CRAN-only R packages...')
+        # Run the installer script in the repo root; it installs CRAN-only R packages into the env created by Snakemake.
+        print('Installing CRAN-only R packages inside conda env...')
         subprocess.check_call(['bash', 'scripts/install_r_packages.sh'])
         os.makedirs(os.path.dirname(output[0]), exist_ok=True)
         open(output[0], 'w').close()
@@ -85,6 +87,6 @@ rule extract_r:
     output:
         OUTPUT_R
     conda:
-        "envs/conda_env.yml"
+        "envs/conda_env_r_geodata.yml"
     shell:
         "Rscript scripts/extract_r.R"
