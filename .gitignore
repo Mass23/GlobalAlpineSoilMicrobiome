@@ -1,0 +1,11 @@
+# Ignore runtime results and caches
+results/
+data/tiles/
+.env
+.Rhistory
+.RData
+__pycache__/
+*.pyc
+*.rds
+*~
+.DS_Store
