@@ -16,13 +16,14 @@ rule install_r_packages:
         R_PKG_DONE
     conda:
         CONDA_ENV
-    run:
-        import subprocess, os
-        print('Installing CRAN/GitLab R packages inside conda env...')
-        subprocess.check_call(['bash', 'scripts/install_r_packages.sh'])
-        os.makedirs(os.path.dirname(output[0]), exist_ok=True)
-        open(output[0], 'w').close()
-
+    shell:
+        """
+        set -euo pipefail
+        echo 'Installing CRAN/GitLab R packages inside conda env...'
+        bash scripts/install_r_packages.sh
+        mkdir -p $(dirname {output})
+        touch {output}
+        """
 rule download_earth_data:
     input:
         R_PKG_DONE, config['points_csv']
