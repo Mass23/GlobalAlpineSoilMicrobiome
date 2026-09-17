@@ -103,34 +103,9 @@ sample_one_raster <- function(url, pts_df){
 
 out <- pts
 
-# discover available monthly vars by probing several representative years (avoid depending on sample_date range)
-probe_years <- c(1979, 1984, 1990, 2000, 2010, 2018, 2020, 2022)
-probe_month <- 1
-
-included_monthly <- c()
-for(var in monthly_candidates){
-  ok <- FALSE
-  for(yr in probe_years){
-    test_url <- chelsa_monthly_url(var, yr, probe_month)
-    https_url <- sub('^/vsicurl/', '', test_url)
-    h <- try(httr::HEAD(https_url, httr::timeout(10)), silent = TRUE)
-    if(!inherits(h, 'try-error') && httr::status_code(h) == 200){
-      ct <- tolower(httr::headers(h)[['content-type']])
-      if(is.null(ct) || !grepl('html', ct)){
-        ok <- TRUE
-        cat('CHELSA: monthly variable available (found year', yr, ') and will be used:', var, '\n')
-        break
-      }
-    }
-  }
-  if(!ok){
-    cat('CHELSA: monthly variable NOT available (no probe years matched), skipping:', var, '\n')
-  } else {
-    included_monthly <- c(included_monthly, var)
-  }
-}
-
-monthly_vars <- included_monthly
+# Use the exact monthly variables list provided (no discovery)
+monthly_vars <- c('tasmax','tasmin','vpd','tas','spi12','spei12','sfcWind','rsds','pr','pet','hurs','cmi','clt')
+cat('CHELSA: monthly variables to be sampled:', paste(monthly_vars, collapse=', '), '\n')
 
 
 
