@@ -22,8 +22,8 @@ rule download_earth_data:
         mkdir -p logs
         mkdir -p $(dirname {output[0]})
         mkdir -p $(dirname {output[1]})
-        echo 'Running R extractor; logs -> logs/extract_r.{out,err}'
-        Rscript scripts/extract_r.R > logs/extract_r.out 2> logs/extract_r.err
+        echo 'Running R extractor; logs -> logs/extract_r.out and logs/extract_r.err'
+        Rscript scripts/extract.R
         if [ ! -f {output[0]} ] || [ ! -f {output[1]} ]; then
             echo 'Expected outputs not created:' {output[0]} {output[1]} >&2
             ls -la $(dirname {output[0]}) >&2 || true
