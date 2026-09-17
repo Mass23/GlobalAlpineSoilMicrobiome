@@ -249,8 +249,6 @@ for(b in 1:19){
   # compute median across models per point (na.rm=TRUE)
   med <- apply(per_model_vals, 1, function(x) median(x, na.rm=TRUE))
   out[[bioname]] <- med
-  # also keep per-model columns
-  for(mi in seq_along(models)) out[[paste0(bioname,'_',models[mi])]] <- per_model_vals[,mi]
 }
 
 # DEM
