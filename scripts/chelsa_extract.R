@@ -21,8 +21,8 @@ monthly_vars <- c('pet','pr','tas','tasmax','tasmin','rsds','sfcWind','hurs','cl
 bios <- sprintf('bio%02d', 1:19)
 models <- c('GFDL-ESM4','IPSL-CM6A-LR','MPI-ESM1-2-HR','MRI-ESM2-0','UKESM1-0-LL')
 
-monthly_base <- 'https://os.unil.cloud.switch.ch/chelsa02/chelsa/global/monthly/'
-bioclim_base <- 'https://os.unil.cloud.switch.ch/chelsa02/chelsa/global/bioclim/'
+monthly_base <- 'os.unil.cloud.switch.ch/chelsa02/chelsa/global/monthly/'
+bioclim_base <- 'os.unil.cloud.switch.ch/chelsa02/chelsa/global/bioclim/'
 
 sample_one_raster <- function(url, pts_df){
   r <- try(terra::rast(url), silent=TRUE)
