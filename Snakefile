@@ -44,8 +44,6 @@ def _collect_urls(cfg):
 
 DOWNLOAD_URLS, DOWNLOAD_TARGETS = _collect_urls(config)
 
-# mark downloaded tiles as temporary
-DOWNLOAD_TARGETS_TEMP = temp(DOWNLOAD_TARGETS) if DOWNLOAD_TARGETS else []
 
 rule all:
     output:
@@ -54,18 +52,11 @@ rule all:
 # Marker file to indicate CRAN-only R packages have been installed into the R env
 R_PKG_DONE = 'envs/.r_packages_installed'
 
-rule download_tiles:
-    # outputs are temporary tiles
-    output:
-        DOWNLOAD_TARGETS_TEMP
-    run:
-        import os, subprocess
-        os.makedirs('data/tiles', exist_ok=True)
-        for url, out in zip(DOWNLOAD_URLS, output):
-            if os.path.exists(out):
-                continue
-            print(f"Downloading {url} -> {out}")
-            subprocess.check_call(["curl", "-fSL", "--retry", "3", "-o", out, url])
+# NOTE: removed the download_tiles rule and any curl-based downloading.
+# The workflow now expects the R extractor (scripts/extract_r.R) to fetch
+# remote datasets using R packages (soilDB, terra, CopernicusDEM) as requested.
+# If future use requires pre-downloaded tile files, re-add a download rule
+# but do NOT mark the same files as temp() when they are also inputs to other rules.
 
 rule install_r_packages:
     output:
