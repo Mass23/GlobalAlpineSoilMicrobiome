@@ -7,7 +7,7 @@ CONDA_ENV = "envs/conda_env_r_geodata-download.yml"
 
 rule all:
     input:
-        rules.download_earth_data.output
+        OUTPUT, OUTPUT_R
 
 R_PKG_DONE = 'envs/.r_packages_installed'
 
