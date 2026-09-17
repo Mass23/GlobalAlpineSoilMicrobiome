@@ -18,9 +18,27 @@ pts <- read.csv('data/points.csv', stringsAsFactors = FALSE)
 if(!all(c('site','lon','lat','sample_date') %in% names(pts))) stop("data/points.csv must contain columns: site, lon, lat, sample_date")
 pts$sample_date <- as.Date(pts$sample_date)
 
-variables <- c(sprintf('bio%02d', 1:19), 'fcf','fgd','scd','pr','tas','tasmin','tasmax')
-# candidate monthly variables (user-supplied); discovery happens after helper functions
-monthly_candidates <- c('clt','cmi','hurs','pet','pr','prec','ps','rsds','sfcWind','spei12','spi12','tas','tasmax','tasmin','tz','vpd')
+variables <- c(sprintf('bio%02d', 1:19), 'fcf','fgd','scd',
+               'clt','cmi','hurs','pet','pr','rsds','sfcWind','spei12','spi12','tas','tasmax','tasmin','vpd')
+# candidate monthly variables (user-supplied) — exact list from your message
+monthly_candidates <- c('clt','cmi','hurs','pet','pr','rsds','sfcWind','spei12','spi12','tas','tasmax','tasmin','vpd')
+
+# metadata for monthly variables (short label, unit, description)
+monthly_metadata <- list(
+  clt = list(label='Total Cloud Cover Percentage', unit='percent'),
+  cmi = list(label='Climate Moisture Index', unit='kg m-2 month-1'),
+  hurs = list(label='Near-Surface Relative Humidity', unit='percent'),
+  pet = list(label='Potential Evapotranspiration', unit='kg m-2 month-1'),
+  pr = list(label='Precipitation', unit='kg m-2 month-1'),
+  rsds = list(label='Surface Downwelling Shortwave Flux', unit='MJ m-2'),
+  sfcWind = list(label='Near-Surface Wind Speed', unit='m s-1'),
+  spei12 = list(label='Standardized Precipitation Evapotranspiration Index', unit='unitless'),
+  spi12 = list(label='Standardized Precipitation Index', unit='unitless'),
+  tas = list(label='Daily Mean Near-Surface Air Temperature', unit='K'),
+  tasmax = list(label='Daily Max Near-Surface Air Temperature', unit='K'),
+  tasmin = list(label='Daily Min Near-Surface Air Temperature', unit='K'),
+  vpd = list(label='Vapor Pressure Deficit', unit='Pa')
+)
 
 # monthly_vars will be determined after helper functions are declared and will default to candidates if discovery fails
 monthly_vars <- NULL
