@@ -2,7 +2,7 @@ configfile: "config/extract_config.yaml"
 
 # Minimal workflow: one rule doing all Earth-data sampling inside R.
 OUTPUT_R = config["output"].get("r_path", "results/sampled_soilgrids_r.csv")
-CONDA_ENV = "envs/conda_env_r_geodata.yml"
+CONDA_ENV = "envs/conda_env_r_geodata-download.yml"
 
 rule all:
     output:
