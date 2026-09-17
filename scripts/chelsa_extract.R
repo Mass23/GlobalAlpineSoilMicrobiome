@@ -19,7 +19,35 @@ if(!all(c('site','lon','lat','sample_date') %in% names(pts))) stop("data/points.
 pts$sample_date <- as.Date(pts$sample_date)
 
 variables <- c(sprintf('bio%02d', 1:19), 'fcf','fgd','scd','pr','tas','tasmin','tasmax')
-monthly_vars <- c('pr', 'tas', 'tasmin', 'tasmax')
+# candidate monthly variables (user-supplied); we'll test which ones are available and use only those that work
+monthly_candidates <- c('clt','cmi','hurs','pet','pr','prec','ps','rsds','sfcWind','spei12','spi12','tas','tasmax','tasmin','tz','vpd')
+
+# discover available monthly vars using a HEAD against an example year/month from the points
+example_date <- if(nrow(pts)>0) pts$sample_date[1] else as.Date('2000-01-01')
+example_year <- as.integer(format(example_date, '%Y'))
+example_month <- as.integer(format(example_date, '%m'))
+
+included_monthly <- c()
+for(var in monthly_candidates){
+  test_url <- chelsa_monthly_url(var, example_year, example_month)
+  # underlying https URL for HEAD
+  https_url <- sub('^/vsicurl/', '', test_url)
+  ok <- FALSE
+  h <- try(httr::HEAD(https_url, httr::timeout(10)), silent = TRUE)
+  if(!inherits(h, 'try-error') && httr::status_code(h) == 200){
+    ct <- tolower(httr::headers(h)[['content-type']])
+    if(is.null(ct) || !grepl('html', ct)) ok <- TRUE
+  }
+  if(ok){
+    included_monthly <- c(included_monthly, var)
+    cat('CHELSA: monthly variable available and will be used:', var, '\n')
+  } else {
+    cat('CHELSA: monthly variable NOT available, skipping:', var, '\n')
+  }
+}
+
+monthly_vars <- included_monthly
+
 # bios variables are a subset of variables
 bios <- sprintf('bio%02d', 1:19)
 # models/institutions for projections (kept for future-proofing)
