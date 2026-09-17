@@ -3,7 +3,7 @@
 # No external config: all logic here. Fail loudly for debugging.
 
 # Required packages
-req <- c('soilDB','dplyr','terra','httr','jsonlite','sf','arrow')
+req <- c('dplyr','terra','httr','jsonlite','sf','arrow')
 missing_pkgs <- req[!req %in% installed.packages()[,'Package']]
 if(length(missing_pkgs)>0){
   stop('Missing required R packages: ', paste(missing_pkgs, collapse=', '),
@@ -41,67 +41,57 @@ parquet_path <- 'results/sampled_soilgrids.parquet'
 if(!dir.exists(dirname(csv_path))) dir.create(dirname(csv_path), recursive=TRUE)
 if(!dir.exists(dirname(parquet_path))) dir.create(dirname(parquet_path), recursive=TRUE)
 
-# SoilGrids sampling
-vars <- c('soc','phh2o')
-depths <- c('0-5','5-15','15-30','30-60','60-100','100-200')
-message('Fetching SoilGrids...')
-soil_res <- fetchSoilGrids(pts2,
-                           variables = vars, depth_intervals = depths,
-                           loc.names = c('id','lat','lon'), verbose=TRUE)
-soil_res[soil_res == -32768] <- NA
-
-thicknesses <- c(5,10,15,30,40,100)
-compute_0_30 <- function(row,var){
-  cols <- paste0(var,'_',depths)
-  vals <- as.numeric(row[cols[1:3]])
-  weights <- thicknesses[1:3]/30
-  if(all(is.na(vals))) return(NA_real_)
-  sum(vals*weights, na.rm=TRUE)/sum(weights[!is.na(vals)])
-}
-midpoints <- c((0+5)/2,(5+15)/2,(15+30)/2,(30+60)/2,(60+100)/2,(100+200)/2)
-linear_interp <- function(row,var,depth_cm){
-  cols <- paste0(var,'_',depths)
-  vals <- as.numeric(row[cols])
-  if(is.na(depth_cm)) return(NA_real_)
-  if(depth_cm <= 30){
-    use_idx <- which(!is.na(vals[1:3])); if(length(use_idx)==0) return(NA_real_)
-    x <- midpoints[use_idx]; y <- vals[use_idx]; return(as.numeric(approx(x,y,xout=depth_cm,rule=2)$y))
-  } else {
-    valid_idx <- which(!is.na(vals)); if(length(valid_idx)==0) return(NA_real_)
-    band_idx <- which(cumsum(thicknesses) >= depth_cm)[1]; if(is.na(band_idx)) band_idx <- length(depths)
-    use_idx <- valid_idx[valid_idx <= band_idx]; if(length(use_idx)==0) return(NA_real_)
-    x <- midpoints[use_idx]; y <- vals[use_idx]; return(as.numeric(approx(x,y,xout=depth_cm,rule=2)$y))
-  }
-}
-
+# SoilGrids handled separately by the Python soilgrids rule.
+# If soilgrids results are present, merge them by 'site'.
 out <- pts
-for(v in vars) out[[paste0('soilgrid_nodepth_',v)]] <- apply(soil_res,1,compute_0_30,var=v)
-if('depth_cm' %in% names(pts)){
-  out$depth_cm <- pts$depth_cm
-  for(v in vars) out[[paste0('soilgrid_depth_',v)]] <- mapply(function(i,d) linear_interp(soil_res[i,],v,d), seq_len(nrow(soil_res)), out$depth_cm)
+soil_csv <- 'results/soilgrids_sampled.csv'
+if(file.exists(soil_csv)){
+  sg <- read.csv(soil_csv, stringsAsFactors=FALSE)
+  if(!'site' %in% names(sg)) stop('soilgrids_sampled.csv must contain site column')
+  # merge keeping order of pts
+  out <- merge(out, sg, by='site', all.x=TRUE, sort=FALSE)
 } else {
-  for(v in vars) out[[paste0('soilgrid_depth_',v)]] <- NA_real_
+  message('No soilgrids_sampled.csv present; soilgrid columns will be NA')
 }
 
 # CHELSA: direct streaming from envicloud WSL bucket (monthly per-year + climatology bioclim SSP370 2011-2040)
 library(xml2)
 
 # Helper: list links in an HTML directory page and return absolute URLs
-list_links <- function(url){
-  res <- httr::GET(url)
-  if(httr::status_code(res) != 200) return(character(0))
-  doc <- tryCatch(xml2::read_html(httr::content(res, as='text', encoding='UTF-8')),
-                  error = function(e) return(character(0)))
-  nodes <- xml2::xml_find_all(doc, './/a')
-  hrefs <- xml2::xml_attr(nodes, 'href')
-  hrefs <- hrefs[!is.na(hrefs)]
-  # make absolute
-  hrefs <- sapply(hrefs, function(h){
-    if(grepl('^https?://', h)) return(h)
-    # handle relative links
-    paste0(sub('/+$','', url), '/', sub('^/+', '', h))
-  }, USE.NAMES = FALSE)
-  hrefs
+# Robust to transient HTTP errors; retries and provides clear failure messages.
+list_links <- function(url, retries = 3){
+  # Use httr::RETRY for transient errors
+  res <- tryCatch(httr::RETRY('GET', url, times = retries, pause_base = 1, terminate_on = c(400)),
+                  error = function(e) e)
+  if(inherits(res, 'error')) stop(sprintf('Failed to GET %s: %s', url, res$message))
+  status <- httr::status_code(res)
+  if(status >= 500){
+    stop(sprintf('Server error %s when requesting %s (possible gateway timeout). Try again later.', status, url))
+  }
+  if(status != 200){
+    # return empty list instead of trying to parse
+    return(character(0))
+  }
+  # check content type
+  ctype <- httr::headers(res)[['content-type']]
+  txt <- httr::content(res, as = 'text', encoding = 'UTF-8')
+  # If content looks like HTML directory listing, parse; otherwise return empty
+  if(grepl('<html', tolower(substring(txt, 1, 200)), fixed = FALSE)){
+    doc <- tryCatch(xml2::read_html(txt), error = function(e) return(character(0)))
+    nodes <- xml2::xml_find_all(doc, './/a')
+    hrefs <- xml2::xml_attr(nodes, 'href')
+    hrefs <- hrefs[!is.na(hrefs)]
+    # make absolute
+    hrefs <- sapply(hrefs, function(h){
+      if(grepl('^https?://', h)) return(h)
+      paste0(sub('/+$','', url), '/', sub('^/+', '', h))
+    }, USE.NAMES = FALSE)
+    return(hrefs)
+  } else {
+    # Not HTML (maybe JSON or redirect) - best effort: try to extract URLs with regex
+    urls <- unlist(regmatches(txt, gregexpr('https?://[^"\'\'\s<>]+', txt)))
+    unique(urls)
+  }
 }
 
 # Base URLs
