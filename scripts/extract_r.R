@@ -173,15 +173,34 @@ if(have_copdem){
   out$dem_elevation <- NA_real_
 }
 
-# Determine output path (allow Snakemake to pass it as first arg)
-args <- commandArgs(trailingOnly = TRUE)
-out_path <- if(length(args) >= 1) args[[1]] else 'results/sampled_soilgrids_r.csv'
+# Determine output paths: read config for output paths if available
+parquet_path <- NULL
+csv_path <- NULL
+if(requireNamespace('yaml', quietly=TRUE)){
+  cfg <- yaml::read_yaml('config/extract_config.yaml')
+  if(!is.null(cfg$output$path)) parquet_path <- cfg$output$path
+  if(!is.null(cfg$output$r_path)) csv_path <- cfg$output$r_path
+}
+if(is.null(csv_path)) csv_path <- 'results/sampled_soilgrids_r.csv'
+if(is.null(parquet_path)) parquet_path <- 'results/sampled_soilgrids.parquet'
 
 # Print resulting table
 print(out)
 
-# Save to requested output path
-out_dir <- dirname(out_path)
-if(!dir.exists(out_dir)) dir.create(out_dir, recursive=TRUE)
-write.csv(out, out_path, row.names=FALSE)
-message(sprintf('Wrote %s', out_path))
+# Ensure output dirs
+csv_dir <- dirname(csv_path)
+parquet_dir <- dirname(parquet_path)
+if(!dir.exists(csv_dir)) dir.create(csv_dir, recursive=TRUE)
+if(!dir.exists(parquet_dir)) dir.create(parquet_dir, recursive=TRUE)
+
+# Write CSV
+write.csv(out, csv_path, row.names=FALSE)
+message(sprintf('Wrote %s', csv_path))
+
+# Write Parquet using arrow
+if(requireNamespace('arrow', quietly=TRUE)){
+  arrow::write_parquet(out, parquet_path)
+  message(sprintf('Wrote %s', parquet_path))
+} else {
+  stop('r-arrow not installed in the R environment; parquet output required by Snakefile. Install r-arrow in the conda env.')
+}
