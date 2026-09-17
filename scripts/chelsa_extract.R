@@ -85,34 +85,35 @@ sample_one_raster <- function(url, pts_df){
 
 out <- pts
 
-# discover available monthly vars using a HEAD against an example year/month from the points
-example_date <- if(nrow(pts)>0) pts$sample_date[1] else as.Date('2000-01-01')
-example_year <- as.integer(format(example_date, '%Y'))
-example_month <- as.integer(format(example_date, '%m'))
+# discover available monthly vars by probing several representative years (avoid depending on sample_date range)
+probe_years <- c(1979, 1984, 1990, 2000, 2010, 2018, 2020, 2022)
+probe_month <- 1
 
 included_monthly <- c()
 for(var in monthly_candidates){
-  test_url <- chelsa_monthly_url(var, example_year, example_month)
-  https_url <- sub('^/vsicurl/', '', test_url)
   ok <- FALSE
-  h <- try(httr::HEAD(https_url, httr::timeout(10)), silent = TRUE)
-  if(!inherits(h, 'try-error') && httr::status_code(h) == 200){
-    ct <- tolower(httr::headers(h)[['content-type']])
-    if(is.null(ct) || !grepl('html', ct)) ok <- TRUE
+  for(yr in probe_years){
+    test_url <- chelsa_monthly_url(var, yr, probe_month)
+    https_url <- sub('^/vsicurl/', '', test_url)
+    h <- try(httr::HEAD(https_url, httr::timeout(10)), silent = TRUE)
+    if(!inherits(h, 'try-error') && httr::status_code(h) == 200){
+      ct <- tolower(httr::headers(h)[['content-type']])
+      if(is.null(ct) || !grepl('html', ct)){
+        ok <- TRUE
+        cat('CHELSA: monthly variable available (found year', yr, ') and will be used:', var, '\n')
+        break
+      }
+    }
   }
-  if(ok){
-    included_monthly <- c(included_monthly, var)
-    cat('CHELSA: monthly variable available and will be used:', var, '\n')
+  if(!ok){
+    cat('CHELSA: monthly variable NOT available (no probe years matched), skipping:', var, '\n')
   } else {
-    cat('CHELSA: monthly variable NOT available, skipping:', var, '\n')
+    included_monthly <- c(included_monthly, var)
   }
 }
 
-# if none found, fallback to empty set (strict we could stop)
-if(length(included_monthly) == 0){
-  cat('CHELSA: no monthly variables available from candidate list; monthly_vars will be empty\n')
-}
 monthly_vars <- included_monthly
+
 
 
 # Monthly variables: construct exact /vsicurl/ URLs per variable/year/month and sample
