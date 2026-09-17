@@ -102,15 +102,58 @@ if('depth_cm' %in% names(pts)){
   for(v in vars) out[[paste0('soilgrid_depth_',v)]] <- NA_real_
 }
 
-# Fetch CHELSA SCD raster (climatology) and sample using terra
-chelsa_url <- 'https://os.zhdk.cloud.switch.ch/chelsav2/GLOBAL/climatologies/1981-2010/bio/CHELSA_scd_1981-2010_V.2.1.tif'
-message('Downloading CHELSA SCD to temp and sampling...')
-chelsa_tmp <- tempfile(fileext='.tif')
-GET(chelsa_url, write_disk(chelsa_tmp, overwrite=TRUE), progress())
-chelsa_r <- rast(chelsa_tmp)
-pts_sp <- vect(pts[,c('lon','lat')], geom=c('lon','lat'), crs='EPSG:4326')
-chelsa_vals <- extract(chelsa_r, pts_sp)
-out$chelsa_scd_1981_2010 <- chelsa_vals[,2]
+# CHELSA: prefer rchelsa when available; else download listed chelsa TIFFs from config and sample sequentially
+# Read config to find chelsa entries
+if(requireNamespace('yaml', quietly=TRUE)){
+  cfg <- yaml::read_yaml('config/extract_config.yaml')
+  chelsa_entries <- cfg$chelsa
+} else {
+  chelsa_entries <- NULL
+}
+
+if(requireNamespace('rchelsa', quietly=TRUE)){
+  message('rchelsa available: attempting to use it to fetch CHELSA climatologies')
+  # Try to use rchelsa; wrap in tryCatch and fall back to manual download if it fails.
+  tryCatch({
+    # Attempt a generic exported function; if it errors we fall back. This is a best-effort call
+    # Users with rchelsa can adapt this section to their preferred API usage.
+    if('chelsa_bioclim' %in% getNamespaceExports('rchelsa')){
+      message('Calling rchelsa::chelsa_bioclim for bioclim variables')
+      res_chelsa <- rchelsa::chelsa_bioclim(points = pts[,c('lon','lat')])
+      # Expect res_chelsa to be a data.frame with columns per variable; merge into out
+      if(is.data.frame(res_chelsa)){
+        for(n in names(res_chelsa)) out[[n]] <- res_chelsa[[n]]
+      }
+    } else {
+      stop('rchelsa does not expose chelsa_bioclim; falling back')
+    }
+  }, error = function(e){
+    message('rchelsa attempt failed: ', e$message)
+    chelsa_entries <- chelsa_entries
+  })
+}
+
+# If no rchelsa result added, use manual download sampling based on config chelsa entries
+if(is.null(chelsa_entries) || length(intersect(names(out), names(chelsa_entries)))==0){
+  if(is.null(chelsa_entries) || length(chelsa_entries)==0){
+    message('No CHELSA entries found in config/extract_config.yaml; skipping CHELSA')
+  } else {
+    message('Sampling CHELSA by downloading listed TIFFs sequentially (temp files will be removed)')
+    pts_sp <- vect(pts[,c('lon','lat')], geom=c('lon','lat'), crs='EPSG:4326')
+    for(nm in names(chelsa_entries)){
+      url <- chelsa_entries[[nm]]
+      try({
+        message('Downloading ', nm, ' -> ', url)
+        tmpf <- tempfile(fileext='.tif')
+        GET(url, write_disk(tmpf, overwrite=TRUE))
+        r <- rast(tmpf)
+        vals <- extract(r, pts_sp)
+        out[[nm]] <- vals[,2]
+        unlink(tmpf)
+      }, silent=FALSE)
+    }
+  }
+}
 
 # DEM: use CopernicusDEM if available, else skip
 if(have_copdem){
