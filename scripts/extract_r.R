@@ -30,15 +30,10 @@ if(!file.exists(pts_file)) stop('data/points.csv not found')
 pts <- read.csv(pts_file, stringsAsFactors=FALSE)
 if(!all(c('lon','lat') %in% names(pts))) stop('points.csv must contain lon and lat columns')
 
-# Ensure an identifier column exists for fetchSoilGrids
+# Require an identifier column named 'site' for reproducibility
+if(!'site' %in% names(pts)) stop("points.csv must contain a 'site' column (identifier).")
 pts2 <- pts
-if('id' %in% names(pts2)){
-  pts2$id <- as.character(pts2$id)
-} else if('site' %in% names(pts2)){
-  pts2$id <- as.character(pts2$site)
-} else {
-  pts2$id <- as.character(seq_len(nrow(pts2)))
-}
+pts2$id <- as.character(pts2$site)
 
 # Output files (fixed)
 csv_path <- 'results/sampled_soilgrids_r.csv'
