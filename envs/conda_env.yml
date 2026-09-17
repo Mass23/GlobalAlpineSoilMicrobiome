@@ -18,15 +18,25 @@ dependencies:
   - r-curl
   - r-devtools
   - r-soildb
-  - r-copernicusdem  # optional: may not be available on all channels; install from CRAN if missing
-  - snakemake
+  - r-dplyr
+  - r-xml2
+  - r-remotes
   - python=3.12  # keep minimal python for utilities if needed
   - pip
 
-# Notes:
-# - This environment contains the R packages required to run scripts/extract_r.R
-# - If a package is not available on conda-forge (e.g. r-copernicusdem), install it from CRAN inside the env:
-#     conda activate globalalpine-r
-#     R -e "install.packages('CopernicusDEM', repos='https://cloud.r-project.org')"
-# - To create this env: mamba env create -f envs/conda_env.yml
-# - To run the R extractor: conda activate globalalpine-r && Rscript scripts/extract_r.R
+# Post-install note
+# Some required R packages are not available as conda packages on conda-forge
+# (notably CopernicusDEM). After creating the env, run the provided helper script
+# to install CRAN-only packages into the activated environment:
+#
+#   conda activate globalalpine-r
+#   bash scripts/install_r_packages.sh
+#
+# This script currently installs: CopernicusDEM
+# Add other CRAN packages to scripts/install_r_packages.sh if needed.
+
+# Create env:
+#   mamba env create -f envs/conda_env.yml
+# Run extractor:
+#   conda activate globalalpine-r
+#   Rscript scripts/extract_r.R
