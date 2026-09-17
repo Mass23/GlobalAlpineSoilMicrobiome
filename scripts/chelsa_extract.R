@@ -25,6 +25,8 @@ monthly_base <- 'os.unil.cloud.switch.ch/chelsa02/chelsa/global/monthly/'
 bioclim_base <- 'os.unil.cloud.switch.ch/chelsa02/chelsa/global/bioclim/'
 
 sample_one_raster <- function(url, pts_df){
+  # Ensure the URL has a protocol; default to https if missing
+  if(!grepl('^https?://', url)) url <- paste0('https://', url)
   r <- try(terra::rast(url), silent=TRUE)
   if(inherits(r,'try-error')) stop(paste('Failed to open raster URL:', url))
   v <- terra::vect(pts_df[,c('lon','lat')], geom = c('lon','lat'), crs = 'EPSG:4326')
