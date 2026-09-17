@@ -103,8 +103,8 @@ list_links <- function(url){
 monthly_base <- 'https://os.unil.cloud.switch.ch/chelsa02/chelsa/global/monthly/'
 bioclim_base <- 'https://os.unil.cloud.switch.ch/chelsa02/chelsa/global/bioclim/'
 
-# For each monthly variable and point, sample the month corresponding to sample_date
-monthly_vars <- c('pr','tas','tasmax','tasmin')
+# Monthly variables list provided
+monthly_vars <- c('clt','cmi','hurs','pet','47','pr','prec','ps','rsds','sfcWind','spei12','spi12','tas','tasmax','tasmin','tz','vpd')
 
 # Helper to get available years for a given variable and month by parsing directory listings
 get_available_years_for_var_month <- function(var, month){
@@ -148,7 +148,6 @@ for(var in monthly_vars){
   sample_years <- as.integer(format(as.Date(pts$sample_date), '%Y'))
   sample_months <- as.integer(format(as.Date(pts$sample_date), '%m'))
   # Find available years for the variable/month by scanning top-level yearly dirs
-  # Use union across months from points to limit requests
   unique_months <- sort(unique(sample_months))
   available_years <- integer(0)
   for(m in unique_months){
@@ -161,28 +160,24 @@ for(var in monthly_vars){
   year_vals <- list()
   year_list <- available_years
   for(y in year_list){
-    month_vals_for_year <- matrix(NA_real_, nrow=nrow(pts), ncol=1)
-    for(m in unique_months){
-      # attempt to find file URL by listing year dir and matching var_month patt
-      year_url <- paste0(monthly_base, y, '/')
-      files <- list_links(year_url)
+    # create storage for months in this year
+    year_vals[[as.character(y)]] <- matrix(NA_real_, nrow=nrow(pts), ncol=length(unique_months))
+    colnames(year_vals[[as.character(y)]]) <- as.character(unique_months)
+    # list year dir files once
+    year_url <- paste0(monthly_base, y, '/')
+    files <- list_links(year_url)
+    for(idx_m in seq_along(unique_months)){
+      m <- unique_months[idx_m]
       patt <- paste0(var, '_', sprintf('%02d', m))
       match_files <- files[grepl(patt, files, ignore.case=TRUE) & grepl('\\.tif$', files, ignore.case=TRUE)]
-      if(length(match_files)==0){
-        # no file for this month in this year
-        next
-      }
+      if(length(match_files)==0) next
       url <- match_files[1]
       vals <- tryCatch(download_and_sample(url), error = function(e) rep(NA_real_, nrow(pts)))
-      # store per-point values for this year-month combination
-      # We'll store as list element named y
-      if(is.null(year_vals[[as.character(y)]])) year_vals[[as.character(y)]] <- matrix(NA_real_, nrow=nrow(pts), ncol=length(unique_months))
-      col_idx <- which(unique_months==m)
-      year_vals[[as.character(y)]][,col_idx] <- vals
+      year_vals[[as.character(y)]][, idx_m] <- vals
     }
   }
-  # Build matrices per point-year using the month column for each point
-  # Construct data.frame years x points
+
+  # Build years vector and matrix
   years_vec <- as.integer(names(year_vals))
   if(length(years_vec)==0) stop('No sampled yearly values for var ', var)
   years_vec <- sort(years_vec)
@@ -190,16 +185,15 @@ for(var in monthly_vars){
   colnames(vals_mat) <- as.character(years_vec)
   for(i in seq_along(years_vec)){
     y <- as.character(years_vec[i])
-    # select col corresponding to each point's month
     for(pi in seq_len(nrow(pts))){
       m <- sample_months[pi]
       col_idx <- which(unique_months==m)
       if(length(col_idx)==0) next
-      vals_mat[pi,i] <- year_vals[[y]][pi,col_idx]
+      vals_mat[pi,i] <- year_vals[[y]][, col_idx]
     }
   }
 
-  # For each point, decide value for its sample year
+  # For each point, decide value for its sample year using 10-year regression if needed
   result_vec <- numeric(nrow(pts))
   for(pi in seq_len(nrow(pts))){
     sy <- sample_years[pi]
@@ -209,54 +203,54 @@ for(var in monthly_vars){
     if(sy %in% years_vec){
       result_vec[pi] <- vals_mat[pi, which(years_vec==sy)]
     } else if(sy < min(years_vec)){
-      # before available range: take earliest available
       result_vec[pi] <- vals_mat[pi,1]
     } else {
-      # sy > max(years_vec): extrapolate using linear regression over last up to 10 years
       recent_idx <- which(years_vec >= (max(years_vec)-9))
       x <- years_vec[recent_idx]
       yvals <- vals_mat[pi, recent_idx]
       valid <- !is.na(yvals)
       if(sum(valid) >= 2){
+        # linear regression over last up to 10 years
         fit <- lm(yvals[valid] ~ x[valid])
         pred <- predict(fit, newdata=data.frame(x=sy))
         result_vec[pi] <- as.numeric(pred)
       } else {
-        # fallback to last available value
         result_vec[pi] <- vals_mat[pi, length(years_vec)]
       }
     }
   }
-  # attach result column named var_month
+  # attach result column named var_sampled
   colname <- paste0(var, '_sampled')
   out[[colname]] <- result_vec
 }
 
-# Bioclim SSP370 2011-2040: list bioclim files under bioclim_base and pick the 2011-2040 SSP370 set
-bio_base_candidates <- list_links(bioclim_base)
-# find directories containing 'SSP' or 'ssp'
-ssp_dirs <- bio_base_candidates[grepl('SSP', bio_base_candidates, ignore.case=TRUE)]
-# try to find a dir for SSP370 and 2011-2040
-bioclim_dir <- NULL
-for(d in ssp_dirs){
-  if(grepl('370', d) && grepl('2011', d)) { bioclim_dir <- d; break }
-}
-if(is.null(bioclim_dir)){
-  # fallback: look for any link containing '2011' and '2040'
-  cand <- bio_base_candidates[grepl('2011', bio_base_candidates) & grepl('2040', bio_base_candidates)]
-  if(length(cand)>0) bioclim_dir <- cand[1]
-}
-if(is.null(bioclim_dir)) stop('Could not find bioclim 2011-2040 SSP370 directory on envicloud; aborting')
+# Bioclim SSP370 2011-2040: iterate GCM models and compute median across models
+models <- c('GFDL-ESM4', 'IPSL-CM6A-LR', 'MPI-ESM1-2-HR', 'MRI-ESM2-0', 'UKESM1-0-LL')
+start_period <- '2011-2040'
 
-# list tif files in bioclim_dir and sample each bio variable
-bio_files <- list_links(bioclim_dir)
-bio_files <- bio_files[grepl('\\.tif$', bio_files, ignore.case=TRUE)]
+# For each bio variable, collect per-model sampled values and compute median
 for(b in 1:19){
-  patt <- paste0('bio', b)
-  f <- bio_files[grepl(patt, bio_files, ignore.case=TRUE)]
-  if(length(f)==0) stop('Missing bioclim file for bio', b, ' in ', bioclim_dir)
-  vals <- download_and_sample(f[1])
-  out[[paste0('bio', b)]] <- vals
+  bioname <- paste0('bio', b)
+  per_model_vals <- matrix(NA_real_, nrow=nrow(pts), ncol=length(models))
+  colnames(per_model_vals) <- models
+  for(mi in seq_along(models)){
+    mdl <- models[mi]
+    # construct expected URL pattern: bioclim_base/bioXX/2011-2040/{MODEL}/ssp370/FILE
+    dir_url <- paste0(bioclim_base, bioname, '/', start_period, '/', mdl, '/ssp370/')
+    files <- list_links(dir_url)
+    tif_files <- files[grepl('\\.tif$', files, ignore.case=TRUE)]
+    if(length(tif_files)==0){
+      stop('No bioclim TIFFs found in ', dir_url, '; check path or model naming')
+    }
+    # pick first matching tif (should be one)
+    f <- tif_files[1]
+    per_model_vals[,mi] <- download_and_sample(f)
+  }
+  # compute median across models per point (na.rm=TRUE)
+  med <- apply(per_model_vals, 1, function(x) median(x, na.rm=TRUE))
+  out[[bioname]] <- med
+  # also keep per-model columns
+  for(mi in seq_along(models)) out[[paste0(bioname,'_',models[mi])]] <- per_model_vals[,mi]
 }
 
 # DEM
