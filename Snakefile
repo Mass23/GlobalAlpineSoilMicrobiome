@@ -9,24 +9,9 @@ rule all:
     input:
         OUTPUT, OUTPUT_R
 
-R_PKG_DONE = 'envs/.r_packages_installed'
-
-rule install_r_packages:
-    output:
-        R_PKG_DONE
-    conda:
-        CONDA_ENV
-    shell:
-        """
-        set -euo pipefail
-        echo 'Installing CRAN/GitLab R packages inside conda env...'
-        bash scripts/install_r_packages.sh
-        mkdir -p $(dirname {output})
-        touch {output}
-        """
 rule download_earth_data:
     input:
-        R_PKG_DONE, config['points_csv']
+        config['points_csv']
     output:
         [OUTPUT, OUTPUT_R]
     conda:
@@ -45,4 +30,3 @@ rule download_earth_data:
         for f in output:
             if not os.path.exists(str(f)):
                 raise Exception('Expected output not created: %s' % f)
-
