@@ -30,6 +30,16 @@ if(!file.exists(pts_file)) stop('data/points.csv not found')
 pts <- read.csv(pts_file, stringsAsFactors=FALSE)
 if(!all(c('lon','lat') %in% names(pts))) stop('points.csv must contain lon and lat columns')
 
+# Ensure an identifier column exists for fetchSoilGrids
+pts2 <- pts
+if('id' %in% names(pts2)){
+  pts2$id <- as.character(pts2$id)
+} else if('site' %in% names(pts2)){
+  pts2$id <- as.character(pts2$site)
+} else {
+  pts2$id <- as.character(seq_len(nrow(pts2)))
+}
+
 # Output files (fixed)
 csv_path <- 'results/sampled_soilgrids_r.csv'
 parquet_path <- 'results/sampled_soilgrids.parquet'
@@ -40,7 +50,7 @@ if(!dir.exists(dirname(parquet_path))) dir.create(dirname(parquet_path), recursi
 vars <- c('soc','phh2o')
 depths <- c('0-5','5-15','15-30','30-60','60-100','100-200')
 message('Fetching SoilGrids...')
-soil_res <- fetchSoilGrids(dplyr::mutate(pts, id = ifelse(is.null(id), as.character(seq_len(n())), as.character(id))),
+soil_res <- fetchSoilGrids(pts2,
                            variables = vars, depth_intervals = depths,
                            loc.names = c('id','lat','lon'), verbose=TRUE)
 soil_res[soil_res == -32768] <- NA
