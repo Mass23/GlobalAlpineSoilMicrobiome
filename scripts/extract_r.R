@@ -78,33 +78,40 @@ if('depth_cm' %in% names(pts)){
   for(v in vars) out[[paste0('soilgrid_depth_',v)]] <- NA_real_
 }
 
-# CHELSA: try rchelsa first
+# CHELSA: prefer rchelsa for bioclim + monthly; fail loudly if monthly extraction not available
 if(requireNamespace('rchelsa', quietly=TRUE)){
-  message('Using rchelsa to extract CHELSA variables')
-  if('chelsa_bioclim' %in% getNamespaceExports('rchelsa')){
-    res_chelsa <- rchelsa::chelsa_bioclim(points=pts[,c('lon','lat')])
-    if(is.data.frame(res_chelsa)) for(nm in names(res_chelsa)) out[[nm]] <- res_chelsa[[nm]]
-    else stop('rchelsa returned unexpected result; aborting')
-  } else stop('rchelsa installed but expected function chelsa_bioclim not found')
-} else {
-  message('rchelsa not available: downloading CHELSA bioclim TIFFs sequentially')
-  base <- 'https://os.zhdk.cloud.switch.ch/chelsav2/GLOBAL/climatologies/1981-2010/bio'
-  bios <- sprintf('CHELSA_bio%d_1981-2010_V.2.1.tif', 1:19)
-  others <- c('CHELSA_scd_1981-2010_V.2.1.tif')
-  all_files <- c(bios, others)
-  pts_sp <- terra::vect(pts[,c('lon','lat')], geom=c('lon','lat'), crs='EPSG:4326')
-  for(fn in all_files){
-    url <- file.path(base, fn)
-    message('Downloading ', url)
-    tmpf <- tempfile(fileext='.tif')
-    res <- httr::GET(url, httr::write_disk(tmpf, overwrite=TRUE), httr::progress())
-    httr::stop_for_status(res)
-    r <- terra::rast(tmpf)
-    vals <- terra::extract(r, pts_sp)
-    colname <- gsub('CHELSA_|_1981-2010_V.2.1.tif','', fn)
-    out[[colname]] <- vals[,2]
-    unlink(tmpf)
+  message('Using rchelsa to extract CHELSA variables (bioclim + monthly)')
+  exports <- getNamespaceExports('rchelsa')
+  # bioclim
+  if('chelsa_bioclim' %in% exports){
+    res_bio <- tryCatch(rchelsa::chelsa_bioclim(points = pts[,c('lon','lat')]), error = function(e) stop('rchelsa::chelsa_bioclim failed: ', e$message))
+    if(is.data.frame(res_bio)){
+      for(nm in names(res_bio)) out[[nm]] <- res_bio[[nm]]
+    } else stop('rchelsa::chelsa_bioclim returned unexpected result; aborting')
+  } else stop('rchelsa installed but function chelsa_bioclim not found; abort')
+
+  # monthly variables: try a set of likely function names; require one to exist
+  monthly_fns <- c('chelsa_monthly','chelsa_get_monthly','chelsa_monthly_extract','chelsa_monthly_values','chelsa_monthly_ts')
+  monthly_fn <- NULL
+  for(fn in monthly_fns) if(fn %in% exports){ monthly_fn <- fn; break }
+  if(is.null(monthly_fn)) stop('rchelsa installed but no known monthly extraction function found; aborting. Please check rchelsa documentation or update the package.')
+
+  monthly_vars <- c('tas','tasmin','tasmax','prec')
+  for(var in monthly_vars){
+    message('Extracting monthly variable: ', var, ' using rchelsa::', monthly_fn)
+    res_month <- tryCatch(do.call(getFromNamespace(monthly_fn, 'rchelsa'), list(points = pts[,c('lon','lat')], variable = var)),
+                          error = function(e) stop('rchelsa monthly extract failed for ', var, ': ', e$message))
+    # Expect res_month to be a data.frame or matrix with 12 columns (months)
+    if(is.data.frame(res_month) || is.matrix(res_month)){
+      # Ensure columns correspond to months; create column names var_01..var_12
+      for(m in seq_len(ncol(res_month))){
+        colname <- sprintf('%s_month%02d', var, m)
+        out[[colname]] <- res_month[,m]
+      }
+    } else stop('rchelsa monthly extract returned unexpected result for ', var)
   }
+} else {
+  stop('rchelsa not installed: installer should have installed it. Aborting because monthly CHELSA variables are required.')
 }
 
 # DEM
