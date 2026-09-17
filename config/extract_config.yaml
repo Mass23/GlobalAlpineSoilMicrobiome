@@ -8,19 +8,44 @@ output:
 
 # SoilGrids variable mapping: var -> band_label -> path
 # Band labels must match: "0-5","5-15","15-30","30-60","60-100","100-200"
+# Using official ISRIC SoilGrids VRT endpoints (remote VRTs that reference tiles).
 soil_vars:
   soc:
-    "0-5": "/path/to/soilgrids/soc_0-5.tif"
-    "5-15": "/path/to/soilgrids/soc_5-15.tif"
-    "15-30": "/path/to/soilgrids/soc_15-30.tif"
-    "30-60": "/path/to/soilgrids/soc_30-60.tif"
-    "60-100": "/path/to/soilgrids/soc_60-100.tif"
-    "100-200": "/path/to/soilgrids/soc_100-200.tif"
-  ph:
-    "0-5": "/path/to/soilgrids/ph_0-5.tif"
-    # ... add other ph bands
+    "0-5": "https://files.isric.org/soilgrids/latest/data/soc/soc_0-5cm_mean.vrt"
+    "5-15": "https://files.isric.org/soilgrids/latest/data/soc/soc_5-15cm_mean.vrt"
+    "15-30": "https://files.isric.org/soilgrids/latest/data/soc/soc_15-30cm_mean.vrt"
+    "30-60": "https://files.isric.org/soilgrids/latest/data/soc/soc_30-60cm_mean.vrt"
+    "60-100": "https://files.isric.org/soilgrids/latest/data/soc/soc_60-100cm_mean.vrt"
+    "100-200": "https://files.isric.org/soilgrids/latest/data/soc/soc_100-200cm_mean.vrt"
+  phh2o:
+    "0-5": "https://files.isric.org/soilgrids/latest/data/phh2o/phh2o_0-5cm_mean.vrt"
+    "5-15": "https://files.isric.org/soilgrids/latest/data/phh2o/phh2o_5-15cm_mean.vrt"
+    "15-30": "https://files.isric.org/soilgrids/latest/data/phh2o/phh2o_15-30cm_mean.vrt"
+    "30-60": "https://files.isric.org/soilgrids/latest/data/phh2o/phh2o_30-60cm_mean.vrt"
+    "60-100": "https://files.isric.org/soilgrids/latest/data/phh2o/phh2o_60-100cm_mean.vrt"
+    "100-200": "https://files.isric.org/soilgrids/latest/data/phh2o/phh2o_100-200cm_mean.vrt"
 
 # CHELSA single-band rasters (BIO1..BIO19, freezing vars, monthly if needed)
+# Using the ENVICloud / OS Zurich mirror for CHELSA v2.1 climatologies (SCD = snow cover days)
+chelsa:
+  scd_1981_2010: "https://os.zhdk.cloud.switch.ch/chelsav2/GLOBAL/climatologies/1981-2010/bio/CHELSA_scd_1981-2010_V.2.1.tif"
+  bio1_1981_2010: "https://os.zhdk.cloud.switch.ch/chelsav2/GLOBAL/climatologies/1981-2010/bio/CHELSA_bio01_1981-2010_V.2.1.tif"
+  # add other CHELSA bio variables as needed, pattern: CHELSA_bioXX_1981-2010_V.2.1.tif
+
+# DEM (Copernicus) COG - recommend Copernicus DEM or SRTM on a cloud-hosted COG
+dem: "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/0/0/0.png"  # placeholder; replace with official Copernicus/CopDEM COG URL
+
+# Landcover, NDVI, Snow (single-band COGs)
+landcover:
+  lc: "https://example.com/landcover/lc_cog.tif"  # replace with preferred landcover COG
+
+# NDVI: placeholder for MODIS/PROBAV/GLASS COGs. Planetary Computer hosts MODIS COGs (use STAC to obtain HTTP URLs).
+ndvi:
+  modis_16d: "https://planetarycomputer.microsoft.com/collection/modis-vegetation-index/items/<date>-<tile>.tif"  # STAC/placeholder
+
+snow:
+  chelsa_scd: "https://os.zhdk.cloud.switch.ch/chelsav2/GLOBAL/climatologies/1981-2010/bio/CHELSA_scd_1981-2010_V.2.1.tif"
+  # For time-series or SWE use CHELSA_swe or other sources
 chelsa:
   bio1: "/path/to/chelsa/BIO1.tif"
   mean_ann_temp: "/path/to/chelsa/mean_annual_temp.tif"
