@@ -2,7 +2,7 @@
 # Deterministic CHELSA extractor: construct exact URLs (V.2.1) and sample rasters.
 # Strict mode: fail if any expected URL is not readable.
 
-req <- c('terra','sf','dplyr','arrow')
+req <- c('terra','sf','dplyr','arrow','httr')
 missing_pkgs <- req[!req %in% installed.packages()[,'Package']]
 if(length(missing_pkgs)>0) stop('Missing R packages: ', paste(missing_pkgs, collapse=', '))
 
@@ -27,8 +27,22 @@ bioclim_base <- 'os.unil.cloud.switch.ch/chelsa02/chelsa/global/bioclim/'
 sample_one_raster <- function(url, pts_df){
   # Ensure the URL has a protocol; default to https if missing
   if(!grepl('^https?://', url)) url <- paste0('https://', url)
+  # Check remote availability with HEAD
+  head_resp <- try(httr::HEAD(url, httr::timeout(30)), silent = TRUE)
+  if(inherits(head_resp, 'try-error')){
+    stop(paste('Failed to reach URL (HEAD failed):', url, '-', as.character(head_resp)))
+  }
+  status <- httr::status_code(head_resp)
+  if(status != 200){
+    stop(paste('Non-200 response for URL:', url, 'status:', status))
+  }
+  ctype <- tolower(httr::headers(head_resp)[['content-type']])
+  if(!is.null(ctype) && grepl('html', ctype)){
+    stop(paste('URL returned HTML (likely an error page):', url))
+  }
+  # Try to open with terra
   r <- try(terra::rast(url), silent=TRUE)
-  if(inherits(r,'try-error')) stop(paste('Failed to open raster URL:', url))
+  if(inherits(r,'try-error')) stop(paste('Failed to open raster URL with terra::rast:', url, '-', r))
   v <- terra::vect(pts_df[,c('lon','lat')], geom = c('lon','lat'), crs = 'EPSG:4326')
   res <- terra::extract(r, v)
   return(res[,2])
