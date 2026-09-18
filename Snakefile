@@ -20,7 +20,7 @@ rule download_chelsa:
     output:
         CHELSA_PARQ, CHELSA_CSV
     conda:
-        "envs/conda_env_chelsa/environment.yml"
+        "envs/conda_env_chelsa.yml"
     shell:
         """
         Rscript scripts/download_chelsa.R
@@ -32,7 +32,7 @@ rule download_soilgrids:
     output:
         SOIL_CSV, SOIL_PARQ
     conda:
-        "envs/conda_env_soilgrids/environment.yml"
+        "envs/conda_env_soilgrids.yml"
     shell:
         """
         python scripts/download_soilgrids.py
@@ -44,7 +44,7 @@ rule download_other_data:
     output:
         OTHER_CSV, OTHER_PARQ
     conda:
-        "envs/conda_env_others/environment.yml"
+        "envs/conda_env_others.yml"
     shell:
         """
         python scripts/download_others.py
@@ -56,7 +56,7 @@ rule download_earth_data:
     output:
         ALL_DATA_PARQ, ALL_DATA_CSV
     conda:
-        "envs/conda_env_merge/environment.yml"
+        "envs/conda_env_merge.yml"
     shell:
         """
         Rscript scripts/merge_extract.R
