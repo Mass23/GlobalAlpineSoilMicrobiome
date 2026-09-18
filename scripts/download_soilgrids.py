@@ -51,15 +51,31 @@ def sample_raster(url, lon, lat):
                         val = np.nan
                     raw_vals.append(val)
                 arr = np.array(raw_vals, dtype=float)
-                # mask nodata values if defined
+
+                # gather metadata for troubleshooting
                 nod = src.nodata
-                if nod is not None:
-                    arr[arr == nod] = np.nan
-                # also mask common sentinel values (SoilGrids sometimes uses 32767/32768)
+                dtype = src.dtypes[0] if len(src.dtypes) > 0 else None
+                scales = getattr(src, 'scales', None)
+                offsets = getattr(src, 'offsets', None)
+
+                # report if suspicious sentinel values are present
                 sentinels = [32767, 32768, -32768, 2147483647]
-                # allow small float tolerances
+                found = []
                 for s in sentinels:
-                    arr[np.isclose(arr, float(s), equal_nan=False)] = np.nan
+                    idx = np.where(np.isclose(arr, float(s), equal_nan=False))[0]
+                    if idx.size > 0:
+                        found.append((s, idx.tolist()))
+                if nod is not None and np.any(arr == nod):
+                    print(f"DEBUG: nodata value {nod} present in samples from {url}", file=sys.stderr)
+                if found:
+                    print(f"DEBUG: sentinel values found in samples from {url}: {found}", file=sys.stderr)
+                    print(f"DEBUG: raster dtype={dtype}, nodata={nod}, scales={scales}, offsets={offsets}", file=sys.stderr)
+                    # print sample coordinates and values for first few occurrences
+                    for s, indices in found:
+                        for ii in indices[:5]:
+                            print(f"DEBUG: sample idx={ii} lon={lon[ii]} lat={lat[ii]} value={arr[ii]}", file=sys.stderr)
+
+                # Return raw array without masking so we can inspect real values
                 return arr
     except Exception as e:
         print(f'Warning: failed to open/sample {url}: {e}', file=sys.stderr)

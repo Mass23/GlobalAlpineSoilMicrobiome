@@ -1,4 +1,5 @@
 # Ignore runtime results and caches
+.snakemake
 results/
 data/tiles/
 .env

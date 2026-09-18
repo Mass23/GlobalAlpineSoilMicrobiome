@@ -1,14 +1,3 @@
-configfile: "config/extract_config.yaml"
-
-# Simplified pipeline: separate rules and one final merge. Each rule points at its env YAML in envs/.
-FINAL_PARQ = config["output"]["path"]
-FINAL_CSV = config["output"].get("r_path", "results/sampled_soilgrids_r.csv")
-
-CONDA_CHELSA = "envs/conda_env_r_chelsa.yml"
-CONDA_SOIL = "envs/conda_env_soilgrids.yml"
-CONDA_OTHER = "envs/conda_env_other.yml"
-CONDA_MERGE = "envs/conda_env_r_merge.yml"
-
 CHELSA_PARQ = 'results/chelsa_climate.parquet'
 CHELSA_CSV = 'results/chelsa_climate.csv'
 SOIL_CSV = 'results/soilgrids_sampled.csv'
@@ -18,7 +7,7 @@ OTHER_PARQ = 'results/other_data.parquet'
 
 rule all:
     input:
-        FINAL_PARQ, FINAL_CSV
+        ALL_DATA_PARQ, ALL_DATA_CSV
 
 rule download_chelsa:
     input:
@@ -26,10 +15,10 @@ rule download_chelsa:
     output:
         CHELSA_PARQ, CHELSA_CSV
     conda:
-        CONDA_CHELSA
+        "envs/conda_env_r_chelsa.yml"
     shell:
         """
-        Rscript scripts/chelsa_extract.R
+        Rscript scripts/download_chelsa.R
         """
 
 rule download_soilgrids:
@@ -38,10 +27,10 @@ rule download_soilgrids:
     output:
         SOIL_CSV, SOIL_PARQ
     conda:
-        CONDA_SOIL
+        "envs/conda_env_soilgrids.yml"
     shell:
         """
-        python scripts/soilgrids_extract.py
+        python scripts/download_soilgrids.py
         """
 
 rule download_other_data:
@@ -50,19 +39,19 @@ rule download_other_data:
     output:
         OTHER_CSV, OTHER_PARQ
     conda:
-        CONDA_OTHER
+        "envs/conda_env_others.yml"
     shell:
         """
-        python scripts/other_extract.py
+        python scripts/download_others.py
         """
 
 rule download_earth_data:
     input:
         CHELSA_PARQ, CHELSA_CSV, SOIL_CSV, SOIL_PARQ, OTHER_CSV, OTHER_PARQ
     output:
-        FINAL_PARQ, FINAL_CSV
+        ALL_DATA_PARQ, ALL_DATA_CSV
     conda:
-        CONDA_MERGE
+        "envs/conda_env_merge.yml"
     shell:
         """
         Rscript scripts/merge_extract.R
