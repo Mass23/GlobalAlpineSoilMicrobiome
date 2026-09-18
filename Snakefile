@@ -1,12 +1,12 @@
-CHELSA_PARQ = 'results/download_data/chelsa_climate.parquet'
-CHELSA_CSV = 'results/download_data/chelsa_climate.csv'
-SOIL_CSV = 'results/download_data/soilgrids_sampled.csv'
-SOIL_PARQ = 'results/download_data/soilgrids_sampled.parquet'
-OTHER_CSV = 'results/download_data/other_data.csv'
-OTHER_PARQ = 'results/download_data/other_data.parquet'
+CHELSA_PARQ = '../epfl-altshuler/GlobalAlpine/results/download_data/chelsa_climate.parquet'
+CHELSA_CSV = '../epfl-altshuler/GlobalAlpine/results/download_data/chelsa_climate.csv'
+SOIL_CSV = '../epfl-altshuler/GlobalAlpine/results/download_data/soilgrids_sampled.csv'
+SOIL_PARQ = '../epfl-altshuler/GlobalAlpine/results/download_data/soilgrids_sampled.parquet'
+OTHER_CSV = '../epfl-altshuler/GlobalAlpine/results/download_data/other_data.csv'
+OTHER_PARQ = '../epfl-altshuler/GlobalAlpine/results/download_data/other_data.parquet'
 
-ALL_DATA_PARQ = 'results/all_sampled_data.parquet'
-ALL_DATA_CSV  = 'results/all_sampled_data.csv'
+ALL_DATA_PARQ = '../epfl-altshuler/GlobalAlpine/results/all_sampled_data.parquet'
+ALL_DATA_CSV  = '../epfl-altshuler/GlobalAlpine/results/all_sampled_data.csv'
 
 DATA_POINTS = 'data/points.csv'
 
