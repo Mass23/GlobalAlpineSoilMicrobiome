@@ -8,13 +8,15 @@ OTHER_PARQ = 'results/download_data/other_data.parquet'
 ALL_DATA_PARQ = 'results/all_sampled_data.parquet'
 ALL_DATA_CSV  = 'results/all_sampled_data.csv'
 
+DATA_POINTS = 'data/points.csv'
+
 rule all:
     input:
         ALL_DATA_PARQ, ALL_DATA_CSV
 
 rule download_chelsa:
     input:
-        config['points_csv']
+        DATA_POINTS
     output:
         CHELSA_PARQ, CHELSA_CSV
     conda:
@@ -26,7 +28,7 @@ rule download_chelsa:
 
 rule download_soilgrids:
     input:
-        config['points_csv']
+        DATA_POINTS
     output:
         SOIL_CSV, SOIL_PARQ
     conda:
@@ -38,7 +40,7 @@ rule download_soilgrids:
 
 rule download_other_data:
     input:
-        config['points_csv']
+        DATA_POINTS
     output:
         OTHER_CSV, OTHER_PARQ
     conda:
