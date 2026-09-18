@@ -1,9 +1,12 @@
-CHELSA_PARQ = 'results/chelsa_climate.parquet'
-CHELSA_CSV = 'results/chelsa_climate.csv'
-SOIL_CSV = 'results/soilgrids_sampled.csv'
-SOIL_PARQ = 'results/soilgrids_sampled.parquet'
-OTHER_CSV = 'results/other_data.csv'
-OTHER_PARQ = 'results/other_data.parquet'
+CHELSA_PARQ = 'results/download_data/chelsa_climate.parquet'
+CHELSA_CSV = 'results/download_data/chelsa_climate.csv'
+SOIL_CSV = 'results/download_data/soilgrids_sampled.csv'
+SOIL_PARQ = 'results/download_data/soilgrids_sampled.parquet'
+OTHER_CSV = 'results/download_data/other_data.csv'
+OTHER_PARQ = 'results/download_data/other_data.parquet'
+
+ALL_DATA_PARQ = 'results/all_sampled_data.parquet'
+ALL_DATA_CSV  = 'results/all_sampled_data.csv'
 
 rule all:
     input:
