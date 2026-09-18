@@ -236,10 +236,16 @@ for(var in monthly_vars){
   # listing$folders contain prefixes like 'chelsa/global/monthly/tasmax/1984/'
   yrs <- integer(0)
   if(length(listing$folders) > 0){
-    yrs <- as.integer(gsub('.*/([0-9]{4})/.+', '\\1', listing$folders))
+    yrs <- as.integer(gsub('.*/([0-9]{4})/', '\\1', listing$folders))
     yrs <- yrs[!is.na(yrs)]
   }
-  # also check if the year folder itself is listed (Contents key equal to prefix) -- ignore
+  # fallback: extract years from file keys if no folders parsed
+  if(length(yrs) == 0 && length(listing$files) > 0){
+    # file keys like 'chelsa/global/monthly/tasmax/1984/CHELSA_tasmax_01_1984_V.2.1.tif'
+    yr_matches <- regmatches(listing$files, regexec('/([0-9]{4})/', listing$files))
+    yrs2 <- unique(na.omit(sapply(yr_matches, function(x) if(length(x)>=2) as.integer(x[2]) else NA_integer_)))
+    yrs <- sort(yrs2)
+  }
   available_years_map[[var]] <- sort(unique(yrs))
 }
 
