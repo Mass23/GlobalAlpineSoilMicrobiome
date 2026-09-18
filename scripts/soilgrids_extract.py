@@ -123,11 +123,12 @@ for var, bands in soil_vars.items():
                 # include bands up to containing band
                 cum_th = np.cumsum(thicknesses)
                 band_idx = np.where(cum_th >= d)[0]
-                if len(band_idx)==0:
-                    band_idx = len(thicknesses)-1
-                max_idx = band_idx[0]
+                if len(band_idx) == 0:
+                    max_idx = len(thicknesses) - 1
+                else:
+                    max_idx = band_idx[0]
                 use_idx = np.where(valid[:max_idx+1])[0]
-                if len(use_idx)==0:
+                if len(use_idx) == 0:
                     depth_vals.append(np.nan); continue
                 x = mids[use_idx]
                 y = band_vals[use_idx, i]
