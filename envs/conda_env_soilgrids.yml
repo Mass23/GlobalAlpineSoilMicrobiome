@@ -1,4 +1,3 @@
-name: globalalpine-soilgrids
 channels:
   - conda-forge
 dependencies:
@@ -10,6 +9,3 @@ dependencies:
   - pyyaml
   - pyarrow
   - pip
-
-# Use: conda activate globalalpine-soilgrids
-# Run: python scripts/soilgrids_extract.py
