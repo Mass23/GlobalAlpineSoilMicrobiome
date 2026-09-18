@@ -20,7 +20,7 @@ rule download_chelsa:
     output:
         CHELSA_PARQ, CHELSA_CSV
     conda:
-        "envs/conda_env_r_chelsa.yml"
+        "envs/conda_env_chelsa.yml"
     shell:
         """
         Rscript scripts/download_chelsa.R
