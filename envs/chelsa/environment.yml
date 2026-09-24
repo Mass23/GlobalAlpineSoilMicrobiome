@@ -1,7 +1,7 @@
 channels:
   - conda-forge
 dependencies:
-  - r-base>=4.2
+  - r-base==3.5.2
   - r-xml2
   - r-httr
   - r-terra
