@@ -51,9 +51,45 @@ rule download_earth_data:
         CHELSA_CSV, SOIL_CSV, OTHER_CSV
     output:
         ALL_DATA_CSV
-    conda:
-        "envs/conda_env_merge.yml"
-    shell:
-        """
-        Rscript scripts/merge_extract.R
-        """
+    run:
+        import pandas as pd
+        from pathlib import Path
+
+        chelsa = pd.read_csv(input[0])
+        soil = pd.read_csv(input[1])
+        other = pd.read_csv(input[2])
+
+        key_cols = [
+            col for col in chelsa.columns
+            if col in soil.columns and col in other.columns
+        ]
+
+        if not key_cols:
+            raise ValueError(
+                "The CHELSA/SoilGrids/Other tables share no columns to join on."
+            )
+
+        print("Joining on:", ", ".join(key_cols))
+
+        merged = chelsa.merge(
+            soil,
+            how="outer",
+            on=key_cols,
+            suffixes=("", ".soil"),
+        )
+
+        merged = merged.merge(
+            other,
+            how="outer",
+            on=key_cols,
+            suffixes=("", ".other"),
+        )
+
+        Path(output[0]).parent.mkdir(parents=True, exist_ok=True)
+        merged.to_csv(output[0], index=False)
+
+        print(
+            f"Wrote {output[0]}: "
+            f"{len(merged)} rows, {len(merged.columns)} columns"
+        )
+
