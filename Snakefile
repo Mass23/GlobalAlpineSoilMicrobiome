@@ -16,7 +16,7 @@ rule download_chelsa:
     output:
         CHELSA_CSV
     conda:
-        "envs/conda_env_chelsa.yml"
+        "envs/chelsa/environment.yml"
     shell:
         """
         Rscript scripts/download_chelsa.R
@@ -28,7 +28,7 @@ rule download_soilgrids:
     output:
         SOIL_CSV
     conda:
-        "envs/conda_env_soilgrids.yml"
+        "envs/soilgrids/environment.yml"
     shell:
         """
         python scripts/download_soilgrids.py
@@ -40,7 +40,7 @@ rule download_other_data:
     output:
         OTHER_CSV
     conda:
-        "envs/conda_env_others.yml"
+        "envs/others/environment.yml"
     shell:
         """
         python scripts/download_others.py
