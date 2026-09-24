@@ -8,7 +8,7 @@ DATA_POINTS = 'data/points.csv'
 
 rule all:
     input:
-        ALL_DATA_PARQ, ALL_DATA_CSV
+        ALL_DATA_CSV
 
 rule download_chelsa:
     input:
