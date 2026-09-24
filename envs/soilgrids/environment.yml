@@ -1,11 +1,10 @@
 channels:
   - conda-forge
+  - nodefaults
 dependencies:
-  - python=3.10
-  - rasterio
-  - gdal
+  - python=3.12
+  - rasterio>=1.3      # pulls in GDAL (with curl, used to stream CHELSA files)
   - numpy
-  - pandas
-  - pyyaml
-  - pyarrow
-  - pip
+  - pandas>=2.0
+  - requests
+  - soilgrids          # SoilGrids WCS services (pulls in owslib, rioxarray)
