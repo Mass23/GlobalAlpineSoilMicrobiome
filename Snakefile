@@ -19,7 +19,7 @@ rule download_chelsa:
         "envs/chelsa/environment.yml"
     shell:
         """
-        Rscript scripts/download_chelsa.R
+        Python scripts/download_chelsa.py
         """
 
 rule download_soilgrids:
