@@ -7,4 +7,3 @@ dependencies:
   - numpy
   - pandas>=2.0
   - requests
-  # - snakemake-minimal  # only if you run Snakemake from this env instead of via `conda:`
