@@ -53,6 +53,7 @@ import requests
 from rasterio.windows import Window
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+import planetary_computer
 
 # --------------------------------------------------------------------------- settings
 POINTS_CSV = Path("/home/renku/work/GlobalAlpineSoilMicrobiome/data/points.csv")
@@ -123,17 +124,19 @@ class Planetary:
                 if attempt == TRIES:
                     raise
                 time.sleep(5 * attempt)
-
     def sign(self, collection: str, href: str) -> str:
-        token, expiry = self._tokens.get(collection, (None, None))
-        if token is None or datetime.now(timezone.utc) > expiry - timedelta(minutes=2):
-            r = self.s.get(f"{SAS_URL}/{collection}", timeout=30)
-            r.raise_for_status()
-            body = r.json()
-            token = body["token"]
-            expiry = datetime.fromisoformat(body["msft:expiry"].replace("Z", "+00:00"))
-            self._tokens[collection] = (token, expiry)
-        return href + ("&" if "?" in href else "?") + token
+        return planetary_computer.sign(href)
+        
+    #def sign(self, collection: str, href: str) -> str:
+    #    token, expiry = self._tokens.get(collection, (None, None))
+    #    if token is None or datetime.now(timezone.utc) > expiry - timedelta(minutes=2):
+    #        r = self.s.get(f"{SAS_URL}/{collection}", timeout=30)
+    #        r.raise_for_status()
+    #        body = r.json()
+    #        token = body["token"]
+    #        expiry = datetime.fromisoformat(body["msft:expiry"].replace("Z", "+00:00"))
+    #        self._tokens[collection] = (token, expiry)
+    #    return href + ("&" if "?" in href else "?") + token
 
 
 # --------------------------------------------------------------------------- DEM
@@ -211,9 +214,33 @@ def fetch_ndvi(pc: Planetary, lon: float, lat: float, sample_date):
         return None
     x, y = sinusoidal_xy(lon, lat)
 
+    #def item_date(f):
+    #    return datetime.fromisoformat(f["properties"]["datetime"].replace("Z", "+00:00")).date()
     def item_date(f):
-        return datetime.fromisoformat(f["properties"]["datetime"].replace("Z", "+00:00")).date()
+        props = f["properties"]
 
+        dt = props.get("datetime")
+
+        if dt is not None:
+            return datetime.fromisoformat(
+                dt.replace("Z", "+00:00")
+                ).date()
+
+        start = props.get("start_datetime")
+        end = props.get("end_datetime")
+
+        if start is not None:
+            return datetime.fromisoformat(
+                start.replace("Z", "+00:00")
+            ).date()
+
+        if end is not None:
+            return datetime.fromisoformat(
+                end.replace("Z", "+00:00")
+            ).date()
+
+        raise ValueError(f"No usable datetime in STAC item {f.get('id')}")
+        
     feats.sort(key=lambda f: abs((item_date(f) - sample_date).days))
     best = None
     for f in feats:
