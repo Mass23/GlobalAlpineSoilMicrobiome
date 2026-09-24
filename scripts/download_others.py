@@ -126,7 +126,6 @@ class Planetary:
                 time.sleep(5 * attempt)
     def sign(self, collection: str, href: str) -> str:
         return planetary_computer.sign(href)
-        
     #def sign(self, collection: str, href: str) -> str:
     #    token, expiry = self._tokens.get(collection, (None, None))
     #    if token is None or datetime.now(timezone.utc) > expiry - timedelta(minutes=2):
@@ -220,26 +219,13 @@ def fetch_ndvi(pc: Planetary, lon: float, lat: float, sample_date):
         props = f["properties"]
 
         dt = props.get("datetime")
+        if dt is None:
+            dt = props.get("start_datetime") or props.get("end_datetime")
 
-        if dt is not None:
-            return datetime.fromisoformat(
-                dt.replace("Z", "+00:00")
-                ).date()
+        if dt is None:
+            raise ValueError(f"No usable datetime in STAC item {f.get('id')}")
 
-        start = props.get("start_datetime")
-        end = props.get("end_datetime")
-
-        if start is not None:
-            return datetime.fromisoformat(
-                start.replace("Z", "+00:00")
-            ).date()
-
-        if end is not None:
-            return datetime.fromisoformat(
-                end.replace("Z", "+00:00")
-            ).date()
-
-        raise ValueError(f"No usable datetime in STAC item {f.get('id')}")
+        return datetime.fromisoformat(dt.replace("Z", "+00:00")).date()
         
     feats.sort(key=lambda f: abs((item_date(f) - sample_date).days))
     best = None
