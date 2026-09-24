@@ -1,11 +1,7 @@
-CHELSA_PARQ = '../epfl-altshuler/GlobalAlpine/results/download_data/chelsa_climate.parquet'
-CHELSA_CSV = '../epfl-altshuler/GlobalAlpine/results/download_data/chelsa_climate.csv'
-SOIL_CSV = '../epfl-altshuler/GlobalAlpine/results/download_data/soilgrids_sampled.csv'
-SOIL_PARQ = '../epfl-altshuler/GlobalAlpine/results/download_data/soilgrids_sampled.parquet'
-OTHER_CSV = '../epfl-altshuler/GlobalAlpine/results/download_data/other_data.csv'
-OTHER_PARQ = '../epfl-altshuler/GlobalAlpine/results/download_data/other_data.parquet'
+CHELSA_CSV = '../epfl-altshuler/GlobalAlpineSoilMicrobiome/data/chelsa_climate.csv'
+SOIL_CSV = '../epfl-altshuler/GlobalAlpineSoilMicrobiome/data/oilgrids_sampled.csv'
+OTHER_CSV = '../epfl-altshuler/GlobalAlpineSoilMicrobiome/data/other_data.csv'
 
-ALL_DATA_PARQ = '../epfl-altshuler/GlobalAlpine/results/all_sampled_data.parquet'
 ALL_DATA_CSV  = '../epfl-altshuler/GlobalAlpine/results/all_sampled_data.csv'
 
 DATA_POINTS = 'data/points.csv'
@@ -18,7 +14,7 @@ rule download_chelsa:
     input:
         DATA_POINTS
     output:
-        CHELSA_PARQ, CHELSA_CSV
+        CHELSA_CSV
     conda:
         "envs/conda_env_chelsa.yml"
     shell:
@@ -30,7 +26,7 @@ rule download_soilgrids:
     input:
         DATA_POINTS
     output:
-        SOIL_CSV, SOIL_PARQ
+        SOIL_CSV
     conda:
         "envs/conda_env_soilgrids.yml"
     shell:
@@ -42,7 +38,7 @@ rule download_other_data:
     input:
         DATA_POINTS
     output:
-        OTHER_CSV, OTHER_PARQ
+        OTHER_CSV
     conda:
         "envs/conda_env_others.yml"
     shell:
@@ -52,9 +48,9 @@ rule download_other_data:
 
 rule download_earth_data:
     input:
-        CHELSA_PARQ, CHELSA_CSV, SOIL_CSV, SOIL_PARQ, OTHER_CSV, OTHER_PARQ
+        CHELSA_CSV, SOIL_CSV, OTHER_CSV
     output:
-        ALL_DATA_PARQ, ALL_DATA_CSV
+        ALL_DATA_CSV
     conda:
         "envs/conda_env_merge.yml"
     shell:
