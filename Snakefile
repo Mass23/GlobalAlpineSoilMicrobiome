@@ -1,6 +1,6 @@
-CHELSA_CSV = '../epfl-altshuler/GlobalAlpineSoilMicrobiome/data/chelsa_climate.csv'
-SOIL_CSV = '../epfl-altshuler/GlobalAlpineSoilMicrobiome/data/soilgrids_sampled.csv'
-OTHER_CSV = '../epfl-altshuler/GlobalAlpineSoilMicrobiome/data/other_data.csv'
+CHELSA_CSV = '../epfl-altshuler/GlobalAlpineSoilMicrobiome/data/climate/chelsa_climate.csv'
+SOIL_CSV = '../epfl-altshuler/GlobalAlpineSoilMicrobiome/data/soilgrids/soilgrids_sampled.csv'
+OTHER_CSV = '../epfl-altshuler/GlobalAlpineSoilMicrobiome/data/others/other_data.csv'
 
 ALL_DATA_CSV  = '../epfl-altshuler/GlobalAlpine/results/all_sampled_data.csv'
 
