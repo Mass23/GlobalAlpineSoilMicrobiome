@@ -56,8 +56,8 @@ from urllib3.util.retry import Retry
 import planetary_computer
 
 # --------------------------------------------------------------------------- settings
-POINTS_CSV = Path("../epfl-altshuler/GlobalAlpineSoilMicrobiome/data/points.csv")
-OUT_CSV = Path("../epfl-altshuler/GlobalAlpineSoilMicrobiome/data/others/other_data.csv")
+POINTS_CSV = Path("/home/renku/work/GlobalAlpineSoilMicrobiome/data/points.csv")
+OUT_CSV = Path("/home/renku/work/GlobalAlpineSoilMicrobiome/data/other_data.csv")
 TMP_DIR = Path("data/tmp")
 CACHE_JSONL = TMP_DIR / "other_data_cache.jsonl"
 
