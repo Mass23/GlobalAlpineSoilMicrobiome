@@ -1,8 +1,8 @@
-CHELSA_CSV = '/home/renku/work/GlobalAlpineSoilMicrobiome/GlobalAlpineSoilMicrobiome/data/chelsa_data.csv'
-SOIL_CSV = '/home/renku/work/GlobalAlpineSoilMicrobiome/GlobalAlpineSoilMicrobiome/data/soilgrids_data.csv'
-OTHER_CSV = '/home/renku/work/GlobalAlpineSoilMicrobiome/GlobalAlpineSoilMicrobiome/data/other_data.csv'
+CHELSA_CSV = '/home/renku/work/GlobalAlpineSoilMicrobiome/data/chelsa_data.csv'
+SOIL_CSV = '/home/renku/work/GlobalAlpineSoilMicrobiome/data/soilgrids_data.csv'
+OTHER_CSV = '/home/renku/work/GlobalAlpineSoilMicrobiome/data/other_data.csv'
 
-ALL_DATA_CSV  = '/home/renku/work/GlobalAlpineSoilMicrobiome/GlobalAlpine/results/all_sampled_data.csv'
+ALL_DATA_CSV  = '/home/renku/work/GlobalAlpineSoilMicrobiome/results/all_sampled_data.csv'
 
 DATA_POINTS = 'data/points.csv'
 

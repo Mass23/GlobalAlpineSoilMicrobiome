@@ -1,0 +1,302 @@
+{"key": "chelsa/global/bioclim/bio01/1981-2010/CHELSA_bio01_1981-2010_V.2.1.tif", "values": {"7.195001,46.240257": -3.9499999999999886, "85.324000,27.717245": 18.450000000000045}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio01/2011-2040/GFDL-ESM4/ssp370/CHELSA_gfdl-esm4_ssp370_bio01_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": -2.349999999999966, "85.324000,27.717245": 19.250000000000057}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio01/2011-2040/IPSL-CM6A-LR/ssp370/CHELSA_ipsl-cm6a-lr_ssp370_bio01_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": -2.5499999999999545, "85.324000,27.717245": 19.150000000000034}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio01/2011-2040/MPI-ESM1-2-HR/ssp370/CHELSA_mpi-esm1-2-hr_ssp370_bio01_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": -3.0499999999999545, "85.324000,27.717245": 18.750000000000057}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio01/2011-2040/MRI-ESM2-0/ssp370/CHELSA_mri-esm2-0_ssp370_bio01_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": -2.5499999999999545, "85.324000,27.717245": 19.05000000000001}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio01/2011-2040/UKESM1-0-LL/ssp370/CHELSA_ukesm1-0-ll_ssp370_bio01_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": -2.1499999999999773, "85.324000,27.717245": 19.05000000000001}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio02/1981-2010/CHELSA_bio02_1981-2010_V.2.1.tif", "values": {"7.195001,46.240257": 10.5, "85.324000,27.717245": 8.6}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio02/2011-2040/GFDL-ESM4/ssp370/CHELSA_gfdl-esm4_ssp370_bio02_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 11.0, "85.324000,27.717245": 8.4}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio02/2011-2040/IPSL-CM6A-LR/ssp370/CHELSA_ipsl-cm6a-lr_ssp370_bio02_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 10.700000000000001, "85.324000,27.717245": 8.5}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio02/2011-2040/MPI-ESM1-2-HR/ssp370/CHELSA_mpi-esm1-2-hr_ssp370_bio02_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 10.700000000000001, "85.324000,27.717245": 8.3}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio02/2011-2040/MRI-ESM2-0/ssp370/CHELSA_mri-esm2-0_ssp370_bio02_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 10.8, "85.324000,27.717245": 8.200000000000001}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio02/2011-2040/UKESM1-0-LL/ssp370/CHELSA_ukesm1-0-ll_ssp370_bio02_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 10.600000000000001, "85.324000,27.717245": 7.2}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio03/1981-2010/CHELSA_bio03_1981-2010_V.2.1.tif", "values": {"7.195001,46.240257": 0.334, "85.324000,27.717245": 0.43}, "scale": 0.001, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio03/2011-2040/GFDL-ESM4/ssp370/CHELSA_gfdl-esm4_ssp370_bio03_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 0.34400000000000003, "85.324000,27.717245": 0.438}, "scale": 0.001, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio03/2011-2040/IPSL-CM6A-LR/ssp370/CHELSA_ipsl-cm6a-lr_ssp370_bio03_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 0.338, "85.324000,27.717245": 0.435}, "scale": 0.001, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio03/2011-2040/MPI-ESM1-2-HR/ssp370/CHELSA_mpi-esm1-2-hr_ssp370_bio03_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 0.33, "85.324000,27.717245": 0.40800000000000003}, "scale": 0.001, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio03/2011-2040/MRI-ESM2-0/ssp370/CHELSA_mri-esm2-0_ssp370_bio03_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 0.34, "85.324000,27.717245": 0.41000000000000003}, "scale": 0.001, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio03/2011-2040/UKESM1-0-LL/ssp370/CHELSA_ukesm1-0-ll_ssp370_bio03_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 0.34400000000000003, "85.324000,27.717245": 0.383}, "scale": 0.001, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio04/1981-2010/CHELSA_bio04_1981-2010_V.2.1.tif", "values": {"7.195001,46.240257": 775.1, "85.324000,27.717245": 448.20000000000005}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio04/2011-2040/GFDL-ESM4/ssp370/CHELSA_gfdl-esm4_ssp370_bio04_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 767.7, "85.324000,27.717245": 438.0}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio04/2011-2040/IPSL-CM6A-LR/ssp370/CHELSA_ipsl-cm6a-lr_ssp370_bio04_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 778.6, "85.324000,27.717245": 444.3}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio04/2011-2040/MPI-ESM1-2-HR/ssp370/CHELSA_mpi-esm1-2-hr_ssp370_bio04_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 797.8000000000001, "85.324000,27.717245": 454.40000000000003}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio04/2011-2040/MRI-ESM2-0/ssp370/CHELSA_mri-esm2-0_ssp370_bio04_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 789.8000000000001, "85.324000,27.717245": 448.40000000000003}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio04/2011-2040/UKESM1-0-LL/ssp370/CHELSA_ukesm1-0-ll_ssp370_bio04_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 782.2, "85.324000,27.717245": 424.5}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio05/1981-2010/CHELSA_bio05_1981-2010_V.2.1.tif", "values": {"7.195001,46.240257": 10.950000000000045, "85.324000,27.717245": 25.950000000000045}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio05/2011-2040/GFDL-ESM4/ssp370/CHELSA_gfdl-esm4_ssp370_bio05_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 12.950000000000045, "85.324000,27.717245": 26.350000000000023}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio05/2011-2040/IPSL-CM6A-LR/ssp370/CHELSA_ipsl-cm6a-lr_ssp370_bio05_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 13.050000000000011, "85.324000,27.717245": 26.450000000000045}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio05/2011-2040/MPI-ESM1-2-HR/ssp370/CHELSA_mpi-esm1-2-hr_ssp370_bio05_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 12.350000000000023, "85.324000,27.717245": 26.350000000000023}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio05/2011-2040/MRI-ESM2-0/ssp370/CHELSA_mri-esm2-0_ssp370_bio05_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 12.650000000000034, "85.324000,27.717245": 26.450000000000045}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio05/2011-2040/UKESM1-0-LL/ssp370/CHELSA_ukesm1-0-ll_ssp370_bio05_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 13.250000000000057, "85.324000,27.717245": 26.250000000000057}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio06/1981-2010/CHELSA_bio06_1981-2010_V.2.1.tif", "values": {"7.195001,46.240257": -20.349999999999966, "85.324000,27.717245": 5.850000000000023}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio06/2011-2040/GFDL-ESM4/ssp370/CHELSA_gfdl-esm4_ssp370_bio06_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": -19.049999999999955, "85.324000,27.717245": 7.250000000000057}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio06/2011-2040/IPSL-CM6A-LR/ssp370/CHELSA_ipsl-cm6a-lr_ssp370_bio06_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": -18.549999999999955, "85.324000,27.717245": 6.850000000000023}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio06/2011-2040/MPI-ESM1-2-HR/ssp370/CHELSA_mpi-esm1-2-hr_ssp370_bio06_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": -19.94999999999996, "85.324000,27.717245": 6.050000000000011}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio06/2011-2040/MRI-ESM2-0/ssp370/CHELSA_mri-esm2-0_ssp370_bio06_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": -18.94999999999996, "85.324000,27.717245": 6.4500000000000455}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio06/2011-2040/UKESM1-0-LL/ssp370/CHELSA_ukesm1-0-ll_ssp370_bio06_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": -17.649999999999977, "85.324000,27.717245": 7.4500000000000455}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio07/1981-2010/CHELSA_bio07_1981-2010_V.2.1.tif", "values": {"7.195001,46.240257": 31.3, "85.324000,27.717245": 20.1}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio07/2011-2040/GFDL-ESM4/ssp370/CHELSA_gfdl-esm4_ssp370_bio07_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 32.0, "85.324000,27.717245": 19.1}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio07/2011-2040/IPSL-CM6A-LR/ssp370/CHELSA_ipsl-cm6a-lr_ssp370_bio07_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 31.6, "85.324000,27.717245": 19.6}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio07/2011-2040/MPI-ESM1-2-HR/ssp370/CHELSA_mpi-esm1-2-hr_ssp370_bio07_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 32.300000000000004, "85.324000,27.717245": 20.3}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio07/2011-2040/MRI-ESM2-0/ssp370/CHELSA_mri-esm2-0_ssp370_bio07_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 31.6, "85.324000,27.717245": 20.0}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio07/2011-2040/UKESM1-0-LL/ssp370/CHELSA_ukesm1-0-ll_ssp370_bio07_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 30.900000000000002, "85.324000,27.717245": 18.8}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio08/1981-2010/CHELSA_bio08_1981-2010_V.2.1.tif", "values": {"7.195001,46.240257": 5.750000000000057, "85.324000,27.717245": 22.950000000000045}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio08/2011-2040/GFDL-ESM4/ssp370/CHELSA_gfdl-esm4_ssp370_bio08_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 5.150000000000034, "85.324000,27.717245": 23.55000000000001}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio08/2011-2040/IPSL-CM6A-LR/ssp370/CHELSA_ipsl-cm6a-lr_ssp370_bio08_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 7.250000000000057, "85.324000,27.717245": 23.750000000000057}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio08/2011-2040/MPI-ESM1-2-HR/ssp370/CHELSA_mpi-esm1-2-hr_ssp370_bio08_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 6.750000000000057, "85.324000,27.717245": 23.650000000000034}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio08/2011-2040/MRI-ESM2-0/ssp370/CHELSA_mri-esm2-0_ssp370_bio08_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 7.4500000000000455, "85.324000,27.717245": 23.650000000000034}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio08/2011-2040/UKESM1-0-LL/ssp370/CHELSA_ukesm1-0-ll_ssp370_bio08_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 7.750000000000057, "85.324000,27.717245": 23.450000000000045}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio09/1981-2010/CHELSA_bio09_1981-2010_V.2.1.tif", "values": {"7.195001,46.240257": -8.449999999999989, "85.324000,27.717245": 12.750000000000057}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio09/2011-2040/GFDL-ESM4/ssp370/CHELSA_gfdl-esm4_ssp370_bio09_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": -2.0499999999999545, "85.324000,27.717245": 13.550000000000011}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio09/2011-2040/IPSL-CM6A-LR/ssp370/CHELSA_ipsl-cm6a-lr_ssp370_bio09_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": -10.649999999999977, "85.324000,27.717245": 13.650000000000034}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio09/2011-2040/MPI-ESM1-2-HR/ssp370/CHELSA_mpi-esm1-2-hr_ssp370_bio09_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": -7.5499999999999545, "85.324000,27.717245": 13.050000000000011}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio09/2011-2040/MRI-ESM2-0/ssp370/CHELSA_mri-esm2-0_ssp370_bio09_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": -7.349999999999966, "85.324000,27.717245": 13.150000000000034}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio09/2011-2040/UKESM1-0-LL/ssp370/CHELSA_ukesm1-0-ll_ssp370_bio09_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": -1.1499999999999773, "85.324000,27.717245": 13.750000000000057}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio10/1981-2010/CHELSA_bio10_1981-2010_V.2.1.tif", "values": {"7.195001,46.240257": 5.750000000000057, "85.324000,27.717245": 23.250000000000057}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio10/2011-2040/GFDL-ESM4/ssp370/CHELSA_gfdl-esm4_ssp370_bio10_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 7.350000000000023, "85.324000,27.717245": 23.750000000000057}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio10/2011-2040/IPSL-CM6A-LR/ssp370/CHELSA_ipsl-cm6a-lr_ssp370_bio10_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 7.250000000000057, "85.324000,27.717245": 23.850000000000023}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio10/2011-2040/MPI-ESM1-2-HR/ssp370/CHELSA_mpi-esm1-2-hr_ssp370_bio10_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 6.750000000000057, "85.324000,27.717245": 23.850000000000023}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio10/2011-2040/MRI-ESM2-0/ssp370/CHELSA_mri-esm2-0_ssp370_bio10_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 7.4500000000000455, "85.324000,27.717245": 23.850000000000023}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio10/2011-2040/UKESM1-0-LL/ssp370/CHELSA_ukesm1-0-ll_ssp370_bio10_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 7.750000000000057, "85.324000,27.717245": 23.650000000000034}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio11/1981-2010/CHELSA_bio11_1981-2010_V.2.1.tif", "values": {"7.195001,46.240257": -14.349999999999966, "85.324000,27.717245": 11.850000000000023}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio11/2011-2040/GFDL-ESM4/ssp370/CHELSA_gfdl-esm4_ssp370_bio11_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": -12.449999999999989, "85.324000,27.717245": 12.850000000000023}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio11/2011-2040/IPSL-CM6A-LR/ssp370/CHELSA_ipsl-cm6a-lr_ssp370_bio11_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": -12.849999999999966, "85.324000,27.717245": 12.650000000000034}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio11/2011-2040/MPI-ESM1-2-HR/ssp370/CHELSA_mpi-esm1-2-hr_ssp370_bio11_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": -13.849999999999966, "85.324000,27.717245": 12.250000000000057}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio11/2011-2040/MRI-ESM2-0/ssp370/CHELSA_mri-esm2-0_ssp370_bio11_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": -13.149999999999977, "85.324000,27.717245": 12.550000000000011}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio11/2011-2040/UKESM1-0-LL/ssp370/CHELSA_ukesm1-0-ll_ssp370_bio11_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": -12.349999999999966, "85.324000,27.717245": 12.850000000000023}, "scale": 0.1, "offset": -273.15}
+{"key": "chelsa/global/bioclim/bio12/1981-2010/CHELSA_bio12_1981-2010_V.2.1.tif", "values": {"7.195001,46.240257": 2036.0, "85.324000,27.717245": 1700.0}, "scale": 1.0, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio12/2011-2040/GFDL-ESM4/ssp370/CHELSA_gfdl-esm4_ssp370_bio12_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 2081.0, "85.324000,27.717245": 1644.0}, "scale": 1.0, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio12/2011-2040/IPSL-CM6A-LR/ssp370/CHELSA_ipsl-cm6a-lr_ssp370_bio12_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 1925.0, "85.324000,27.717245": 1668.0}, "scale": 1.0, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio12/2011-2040/MPI-ESM1-2-HR/ssp370/CHELSA_mpi-esm1-2-hr_ssp370_bio12_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 2062.0, "85.324000,27.717245": 1705.0}, "scale": 1.0, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio12/2011-2040/MRI-ESM2-0/ssp370/CHELSA_mri-esm2-0_ssp370_bio12_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 2066.0, "85.324000,27.717245": 1769.0}, "scale": 1.0, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio12/2011-2040/UKESM1-0-LL/ssp370/CHELSA_ukesm1-0-ll_ssp370_bio12_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 2026.0, "85.324000,27.717245": 2098.0}, "scale": 1.0, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio13/1981-2010/CHELSA_bio13_1981-2010_V.2.1.tif", "values": {"7.195001,46.240257": 214.70000000000002, "85.324000,27.717245": 454.3}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio13/2011-2040/GFDL-ESM4/ssp370/CHELSA_gfdl-esm4_ssp370_bio13_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 226.0, "85.324000,27.717245": 410.1}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio13/2011-2040/IPSL-CM6A-LR/ssp370/CHELSA_ipsl-cm6a-lr_ssp370_bio13_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 203.20000000000002, "85.324000,27.717245": 460.70000000000005}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio13/2011-2040/MPI-ESM1-2-HR/ssp370/CHELSA_mpi-esm1-2-hr_ssp370_bio13_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 235.10000000000002, "85.324000,27.717245": 414.40000000000003}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio13/2011-2040/MRI-ESM2-0/ssp370/CHELSA_mri-esm2-0_ssp370_bio13_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 230.10000000000002, "85.324000,27.717245": 471.0}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio13/2011-2040/UKESM1-0-LL/ssp370/CHELSA_ukesm1-0-ll_ssp370_bio13_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 209.10000000000002, "85.324000,27.717245": 570.3000000000001}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio14/1981-2010/CHELSA_bio14_1981-2010_V.2.1.tif", "values": {"7.195001,46.240257": 136.1, "85.324000,27.717245": 7.800000000000001}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio14/2011-2040/GFDL-ESM4/ssp370/CHELSA_gfdl-esm4_ssp370_bio14_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 143.6, "85.324000,27.717245": 8.3}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio14/2011-2040/IPSL-CM6A-LR/ssp370/CHELSA_ipsl-cm6a-lr_ssp370_bio14_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 124.4, "85.324000,27.717245": 8.5}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio14/2011-2040/MPI-ESM1-2-HR/ssp370/CHELSA_mpi-esm1-2-hr_ssp370_bio14_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 125.2, "85.324000,27.717245": 8.3}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio14/2011-2040/MRI-ESM2-0/ssp370/CHELSA_mri-esm2-0_ssp370_bio14_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 137.8, "85.324000,27.717245": 8.6}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio14/2011-2040/UKESM1-0-LL/ssp370/CHELSA_ukesm1-0-ll_ssp370_bio14_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 130.0, "85.324000,27.717245": 7.6000000000000005}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio15/1981-2010/CHELSA_bio15_1981-2010_V.2.1.tif", "values": {"7.195001,46.240257": 15.5, "85.324000,27.717245": 109.5}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio15/2011-2040/GFDL-ESM4/ssp370/CHELSA_gfdl-esm4_ssp370_bio15_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 15.5, "85.324000,27.717245": 107.0}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio15/2011-2040/IPSL-CM6A-LR/ssp370/CHELSA_ipsl-cm6a-lr_ssp370_bio15_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 17.900000000000002, "85.324000,27.717245": 107.7}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio15/2011-2040/MPI-ESM1-2-HR/ssp370/CHELSA_mpi-esm1-2-hr_ssp370_bio15_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 17.900000000000002, "85.324000,27.717245": 103.9}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio15/2011-2040/MRI-ESM2-0/ssp370/CHELSA_mri-esm2-0_ssp370_bio15_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 18.400000000000002, "85.324000,27.717245": 110.7}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio15/2011-2040/UKESM1-0-LL/ssp370/CHELSA_ukesm1-0-ll_ssp370_bio15_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 16.0, "85.324000,27.717245": 108.4}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio16/1981-2010/CHELSA_bio16_1981-2010_V.2.1.tif", "values": {"7.195001,46.240257": 626.7, "85.324000,27.717245": 1136.7}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio16/2011-2040/GFDL-ESM4/ssp370/CHELSA_gfdl-esm4_ssp370_bio16_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 629.3000000000001, "85.324000,27.717245": 1078.0}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio16/2011-2040/IPSL-CM6A-LR/ssp370/CHELSA_ipsl-cm6a-lr_ssp370_bio16_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 593.3000000000001, "85.324000,27.717245": 1097.2}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio16/2011-2040/MPI-ESM1-2-HR/ssp370/CHELSA_mpi-esm1-2-hr_ssp370_bio16_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 646.5, "85.324000,27.717245": 1111.3}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio16/2011-2040/MRI-ESM2-0/ssp370/CHELSA_mri-esm2-0_ssp370_bio16_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 638.4000000000001, "85.324000,27.717245": 1199.3}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio16/2011-2040/UKESM1-0-LL/ssp370/CHELSA_ukesm1-0-ll_ssp370_bio16_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 590.2, "85.324000,27.717245": 1385.2}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio17/1981-2010/CHELSA_bio17_1981-2010_V.2.1.tif", "values": {"7.195001,46.240257": 428.3, "85.324000,27.717245": 38.400000000000006}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio17/2011-2040/GFDL-ESM4/ssp370/CHELSA_gfdl-esm4_ssp370_bio17_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 454.90000000000003, "85.324000,27.717245": 36.2}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio17/2011-2040/IPSL-CM6A-LR/ssp370/CHELSA_ipsl-cm6a-lr_ssp370_bio17_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 399.8, "85.324000,27.717245": 46.5}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio17/2011-2040/MPI-ESM1-2-HR/ssp370/CHELSA_mpi-esm1-2-hr_ssp370_bio17_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 431.3, "85.324000,27.717245": 42.0}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio17/2011-2040/MRI-ESM2-0/ssp370/CHELSA_mri-esm2-0_ssp370_bio17_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 430.3, "85.324000,27.717245": 37.9}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio17/2011-2040/UKESM1-0-LL/ssp370/CHELSA_ukesm1-0-ll_ssp370_bio17_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 422.5, "85.324000,27.717245": 45.1}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio18/1981-2010/CHELSA_bio18_1981-2010_V.2.1.tif", "values": {"7.195001,46.240257": 626.7, "85.324000,27.717245": 1106.5}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio18/2011-2040/GFDL-ESM4/ssp370/CHELSA_gfdl-esm4_ssp370_bio18_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 627.4000000000001, "85.324000,27.717245": 1057.0}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio18/2011-2040/IPSL-CM6A-LR/ssp370/CHELSA_ipsl-cm6a-lr_ssp370_bio18_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 593.3000000000001, "85.324000,27.717245": 1067.1000000000001}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio18/2011-2040/MPI-ESM1-2-HR/ssp370/CHELSA_mpi-esm1-2-hr_ssp370_bio18_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 646.5, "85.324000,27.717245": 1049.3}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio18/2011-2040/MRI-ESM2-0/ssp370/CHELSA_mri-esm2-0_ssp370_bio18_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 638.4000000000001, "85.324000,27.717245": 1159.3}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio18/2011-2040/UKESM1-0-LL/ssp370/CHELSA_ukesm1-0-ll_ssp370_bio18_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 590.2, "85.324000,27.717245": 1317.4}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio19/1981-2010/CHELSA_bio19_1981-2010_V.2.1.tif", "values": {"7.195001,46.240257": 479.0, "85.324000,27.717245": 54.7}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio19/2011-2040/GFDL-ESM4/ssp370/CHELSA_gfdl-esm4_ssp370_bio19_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 482.5, "85.324000,27.717245": 49.400000000000006}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio19/2011-2040/IPSL-CM6A-LR/ssp370/CHELSA_ipsl-cm6a-lr_ssp370_bio19_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 456.20000000000005, "85.324000,27.717245": 63.0}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio19/2011-2040/MPI-ESM1-2-HR/ssp370/CHELSA_mpi-esm1-2-hr_ssp370_bio19_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 517.9, "85.324000,27.717245": 57.0}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio19/2011-2040/MRI-ESM2-0/ssp370/CHELSA_mri-esm2-0_ssp370_bio19_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 521.9, "85.324000,27.717245": 57.800000000000004}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/bio19/2011-2040/UKESM1-0-LL/ssp370/CHELSA_ukesm1-0-ll_ssp370_bio19_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 505.6, "85.324000,27.717245": 60.400000000000006}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/bioclim/fcf/1981-2010/CHELSA_fcf_1981-2010_V.2.1.tif", "values": {"7.195001,46.240257": 167.0, "85.324000,27.717245": 0.0}, "scale": 1.0, "offset": 0.0}
+{"key": "chelsa/global/bioclim/fcf/2011-2040/GFDL-ESM4/ssp370/CHELSA_gfdl-esm4_ssp370_fcf_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 155.0, "85.324000,27.717245": 0.0}, "scale": 1.0, "offset": 0.0}
+{"key": "chelsa/global/bioclim/fcf/2011-2040/IPSL-CM6A-LR/ssp370/CHELSA_ipsl-cm6a-lr_ssp370_fcf_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 143.0, "85.324000,27.717245": 0.0}, "scale": 1.0, "offset": 0.0}
+{"key": "chelsa/global/bioclim/fcf/2011-2040/MPI-ESM1-2-HR/ssp370/CHELSA_mpi-esm1-2-hr_ssp370_fcf_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 145.0, "85.324000,27.717245": 0.0}, "scale": 1.0, "offset": 0.0}
+{"key": "chelsa/global/bioclim/fcf/2011-2040/MRI-ESM2-0/ssp370/CHELSA_mri-esm2-0_ssp370_fcf_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 142.0, "85.324000,27.717245": 0.0}, "scale": 1.0, "offset": 0.0}
+{"key": "chelsa/global/bioclim/fcf/2011-2040/UKESM1-0-LL/ssp370/CHELSA_ukesm1-0-ll_ssp370_fcf_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 139.0, "85.324000,27.717245": 0.0}, "scale": 1.0, "offset": 0.0}
+{"key": "chelsa/global/bioclim/fgd/1981-2010/CHELSA_fgd_1981-2010_V.2.1.tif", "values": {"7.195001,46.240257": 0.0, "85.324000,27.717245": 106.0}, "scale": 1.0, "offset": 0.0}
+{"key": "chelsa/global/bioclim/fgd/2011-2040/GFDL-ESM4/ssp370/CHELSA_gfdl-esm4_ssp370_fgd_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 228.0, "85.324000,27.717245": 106.0}, "scale": 1.0, "offset": 0.0}
+{"key": "chelsa/global/bioclim/fgd/2011-2040/IPSL-CM6A-LR/ssp370/CHELSA_ipsl-cm6a-lr_ssp370_fgd_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 230.0, "85.324000,27.717245": 113.0}, "scale": 1.0, "offset": 0.0}
+{"key": "chelsa/global/bioclim/fgd/2011-2040/MPI-ESM1-2-HR/ssp370/CHELSA_mpi-esm1-2-hr_ssp370_fgd_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 244.0, "85.324000,27.717245": 123.0}, "scale": 1.0, "offset": 0.0}
+{"key": "chelsa/global/bioclim/fgd/2011-2040/MRI-ESM2-0/ssp370/CHELSA_mri-esm2-0_ssp370_fgd_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 229.0, "85.324000,27.717245": 116.0}, "scale": 1.0, "offset": 0.0}
+{"key": "chelsa/global/bioclim/fgd/2011-2040/UKESM1-0-LL/ssp370/CHELSA_ukesm1-0-ll_ssp370_fgd_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 229.0, "85.324000,27.717245": 122.0}, "scale": 1.0, "offset": 0.0}
+{"key": "chelsa/global/bioclim/scd/1981-2010/CHELSA_scd_1981-2010_V.2.1.tif", "values": {"7.195001,46.240257": 365.0, "85.324000,27.717245": 0.0}, "scale": 1.0, "offset": 0.0}
+{"key": "chelsa/global/bioclim/scd/2011-2040/GFDL-ESM4/ssp370/CHELSA_gfdl-esm4_ssp370_scd_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 311.0, "85.324000,27.717245": 0.0}, "scale": 1.0, "offset": 0.0}
+{"key": "chelsa/global/bioclim/scd/2011-2040/IPSL-CM6A-LR/ssp370/CHELSA_ipsl-cm6a-lr_ssp370_scd_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 311.0, "85.324000,27.717245": 0.0}, "scale": 1.0, "offset": 0.0}
+{"key": "chelsa/global/bioclim/scd/2011-2040/MPI-ESM1-2-HR/ssp370/CHELSA_mpi-esm1-2-hr_ssp370_scd_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 328.0, "85.324000,27.717245": 0.0}, "scale": 1.0, "offset": 0.0}
+{"key": "chelsa/global/bioclim/scd/2011-2040/MRI-ESM2-0/ssp370/CHELSA_mri-esm2-0_ssp370_scd_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 309.0, "85.324000,27.717245": 0.0}, "scale": 1.0, "offset": 0.0}
+{"key": "chelsa/global/bioclim/scd/2011-2040/UKESM1-0-LL/ssp370/CHELSA_ukesm1-0-ll_ssp370_scd_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 305.0, "85.324000,27.717245": 0.0}, "scale": 1.0, "offset": 0.0}
+{"key": "chelsa/global/climatologies/pr/2011-2040/GFDL-ESM4/ssp370/CHELSA_gfdl-esm4_r1i1p1f1_w5e5_ssp370_pr_07_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 226.0}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/climatologies/pr/2011-2040/GFDL-ESM4/ssp370/CHELSA_gfdl-esm4_r1i1p1f1_w5e5_ssp370_pr_08_2011-2040_V.2.1.tif", "values": {"85.324000,27.717245": 402.6}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/climatologies/pr/2011-2040/IPSL-CM6A-LR/ssp370/CHELSA_ipsl-cm6a-lr_r1i1p1f1_w5e5_ssp370_pr_07_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 196.4}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/climatologies/pr/2011-2040/IPSL-CM6A-LR/ssp370/CHELSA_ipsl-cm6a-lr_r1i1p1f1_w5e5_ssp370_pr_08_2011-2040_V.2.1.tif", "values": {"85.324000,27.717245": 381.90000000000003}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/climatologies/pr/2011-2040/MPI-ESM1-2-HR/ssp370/CHELSA_mpi-esm1-2-hr_r1i1p1f1_w5e5_ssp370_pr_07_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 195.5}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/climatologies/pr/2011-2040/MPI-ESM1-2-HR/ssp370/CHELSA_mpi-esm1-2-hr_r1i1p1f1_w5e5_ssp370_pr_08_2011-2040_V.2.1.tif", "values": {"85.324000,27.717245": 414.40000000000003}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/climatologies/pr/2011-2040/MRI-ESM2-0/ssp370/CHELSA_mri-esm2-0_r1i1p1f1_w5e5_ssp370_pr_07_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 230.10000000000002}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/climatologies/pr/2011-2040/MRI-ESM2-0/ssp370/CHELSA_mri-esm2-0_r1i1p1f1_w5e5_ssp370_pr_08_2011-2040_V.2.1.tif", "values": {"85.324000,27.717245": 433.8}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/climatologies/pr/2011-2040/UKESM1-0-LL/ssp370/CHELSA_ukesm1-0-ll_r1i1p1f1_w5e5_ssp370_pr_07_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 209.10000000000002}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/climatologies/pr/2011-2040/UKESM1-0-LL/ssp370/CHELSA_ukesm1-0-ll_r1i1p1f1_w5e5_ssp370_pr_08_2011-2040_V.2.1.tif", "values": {"85.324000,27.717245": 492.3}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/climatologies/tas/2011-2040/GFDL-ESM4/ssp370/CHELSA_gfdl-esm4_r1i1p1f1_w5e5_ssp370_tas_07_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 281.2}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/climatologies/tas/2011-2040/GFDL-ESM4/ssp370/CHELSA_gfdl-esm4_r1i1p1f1_w5e5_ssp370_tas_08_2011-2040_V.2.1.tif", "values": {"85.324000,27.717245": 296.90000000000003}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/climatologies/tas/2011-2040/IPSL-CM6A-LR/ssp370/CHELSA_ipsl-cm6a-lr_r1i1p1f1_w5e5_ssp370_tas_07_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 281.0}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/climatologies/tas/2011-2040/IPSL-CM6A-LR/ssp370/CHELSA_ipsl-cm6a-lr_r1i1p1f1_w5e5_ssp370_tas_08_2011-2040_V.2.1.tif", "values": {"85.324000,27.717245": 297.1}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/climatologies/tas/2011-2040/MPI-ESM1-2-HR/ssp370/CHELSA_mpi-esm1-2-hr_r1i1p1f1_w5e5_ssp370_tas_07_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 281.1}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/climatologies/tas/2011-2040/MPI-ESM1-2-HR/ssp370/CHELSA_mpi-esm1-2-hr_r1i1p1f1_w5e5_ssp370_tas_08_2011-2040_V.2.1.tif", "values": {"85.324000,27.717245": 297.2}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/climatologies/tas/2011-2040/MRI-ESM2-0/ssp370/CHELSA_mri-esm2-0_r1i1p1f1_w5e5_ssp370_tas_07_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 281.5}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/climatologies/tas/2011-2040/MRI-ESM2-0/ssp370/CHELSA_mri-esm2-0_r1i1p1f1_w5e5_ssp370_tas_08_2011-2040_V.2.1.tif", "values": {"85.324000,27.717245": 297.0}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/climatologies/tas/2011-2040/UKESM1-0-LL/ssp370/CHELSA_ukesm1-0-ll_r1i1p1f1_w5e5_ssp370_tas_07_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 281.90000000000003}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/climatologies/tas/2011-2040/UKESM1-0-LL/ssp370/CHELSA_ukesm1-0-ll_r1i1p1f1_w5e5_ssp370_tas_08_2011-2040_V.2.1.tif", "values": {"85.324000,27.717245": 297.0}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/climatologies/tasmax/2011-2040/GFDL-ESM4/ssp370/CHELSA_gfdl-esm4_r1i1p1f1_w5e5_ssp370_tasmax_07_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 285.7}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/climatologies/tasmax/2011-2040/GFDL-ESM4/ssp370/CHELSA_gfdl-esm4_r1i1p1f1_w5e5_ssp370_tasmax_08_2011-2040_V.2.1.tif", "values": {"85.324000,27.717245": 299.1}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/climatologies/tasmax/2011-2040/IPSL-CM6A-LR/ssp370/CHELSA_ipsl-cm6a-lr_r1i1p1f1_w5e5_ssp370_tasmax_07_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 285.5}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/climatologies/tasmax/2011-2040/IPSL-CM6A-LR/ssp370/CHELSA_ipsl-cm6a-lr_r1i1p1f1_w5e5_ssp370_tasmax_08_2011-2040_V.2.1.tif", "values": {"85.324000,27.717245": 299.40000000000003}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/climatologies/tasmax/2011-2040/MPI-ESM1-2-HR/ssp370/CHELSA_mpi-esm1-2-hr_r1i1p1f1_w5e5_ssp370_tasmax_07_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 285.5}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/climatologies/tasmax/2011-2040/MPI-ESM1-2-HR/ssp370/CHELSA_mpi-esm1-2-hr_r1i1p1f1_w5e5_ssp370_tasmax_08_2011-2040_V.2.1.tif", "values": {"85.324000,27.717245": 299.3}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/climatologies/tasmax/2011-2040/MRI-ESM2-0/ssp370/CHELSA_mri-esm2-0_r1i1p1f1_w5e5_ssp370_tasmax_07_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 285.8}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/climatologies/tasmax/2011-2040/MRI-ESM2-0/ssp370/CHELSA_mri-esm2-0_r1i1p1f1_w5e5_ssp370_tasmax_08_2011-2040_V.2.1.tif", "values": {"85.324000,27.717245": 298.90000000000003}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/climatologies/tasmax/2011-2040/UKESM1-0-LL/ssp370/CHELSA_ukesm1-0-ll_r1i1p1f1_w5e5_ssp370_tasmax_07_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 286.3}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/climatologies/tasmax/2011-2040/UKESM1-0-LL/ssp370/CHELSA_ukesm1-0-ll_r1i1p1f1_w5e5_ssp370_tasmax_08_2011-2040_V.2.1.tif", "values": {"85.324000,27.717245": 298.90000000000003}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/climatologies/tasmin/2011-2040/GFDL-ESM4/ssp370/CHELSA_gfdl-esm4_r1i1p1f1_w5e5_ssp370_tasmin_07_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 274.0}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/climatologies/tasmin/2011-2040/GFDL-ESM4/ssp370/CHELSA_gfdl-esm4_r1i1p1f1_w5e5_ssp370_tasmin_08_2011-2040_V.2.1.tif", "values": {"85.324000,27.717245": 293.5}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/climatologies/tasmin/2011-2040/IPSL-CM6A-LR/ssp370/CHELSA_ipsl-cm6a-lr_r1i1p1f1_w5e5_ssp370_tasmin_07_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 274.0}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/climatologies/tasmin/2011-2040/IPSL-CM6A-LR/ssp370/CHELSA_ipsl-cm6a-lr_r1i1p1f1_w5e5_ssp370_tasmin_08_2011-2040_V.2.1.tif", "values": {"85.324000,27.717245": 293.8}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/climatologies/tasmin/2011-2040/MPI-ESM1-2-HR/ssp370/CHELSA_mpi-esm1-2-hr_r1i1p1f1_w5e5_ssp370_tasmin_07_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 274.0}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/climatologies/tasmin/2011-2040/MPI-ESM1-2-HR/ssp370/CHELSA_mpi-esm1-2-hr_r1i1p1f1_w5e5_ssp370_tasmin_08_2011-2040_V.2.1.tif", "values": {"85.324000,27.717245": 293.8}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/climatologies/tasmin/2011-2040/MRI-ESM2-0/ssp370/CHELSA_mri-esm2-0_r1i1p1f1_w5e5_ssp370_tasmin_07_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 274.6}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/climatologies/tasmin/2011-2040/MRI-ESM2-0/ssp370/CHELSA_mri-esm2-0_r1i1p1f1_w5e5_ssp370_tasmin_08_2011-2040_V.2.1.tif", "values": {"85.324000,27.717245": 293.8}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/climatologies/tasmin/2011-2040/UKESM1-0-LL/ssp370/CHELSA_ukesm1-0-ll_r1i1p1f1_w5e5_ssp370_tasmin_07_2011-2040_V.2.1.tif", "values": {"7.195001,46.240257": 274.90000000000003}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/climatologies/tasmin/2011-2040/UKESM1-0-LL/ssp370/CHELSA_ukesm1-0-ll_r1i1p1f1_w5e5_ssp370_tasmin_08_2011-2040_V.2.1.tif", "values": {"85.324000,27.717245": 294.0}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/clt/2017/CHELSA_clt_07_2017_V.2.1.tif", "values": {"7.195001,46.240257": 41.82}, "scale": 0.01, "offset": 0.0}
+{"key": "chelsa/global/monthly/clt/2017/CHELSA_clt_08_2017_V.2.1.tif", "values": {"85.324000,27.717245": 74.73}, "scale": 0.01, "offset": 0.0}
+{"key": "chelsa/global/monthly/clt/2018/CHELSA_clt_07_2018_V.2.1.tif", "values": {"7.195001,46.240257": 30.63}, "scale": 0.01, "offset": 0.0}
+{"key": "chelsa/global/monthly/clt/2018/CHELSA_clt_08_2018_V.2.1.tif", "values": {"85.324000,27.717245": 78.48}, "scale": 0.01, "offset": 0.0}
+{"key": "chelsa/global/monthly/clt/2019/CHELSA_clt_07_2019_V.2.1.tif", "values": {"7.195001,46.240257": 39.26}, "scale": 0.01, "offset": -0.0}
+{"key": "chelsa/global/monthly/clt/2019/CHELSA_clt_08_2019_V.2.1.tif", "values": {"85.324000,27.717245": 59.84}, "scale": 0.01, "offset": -0.0}
+{"key": "chelsa/global/monthly/clt/2020/CHELSA_clt_07_2020_V.2.1.tif", "values": {"7.195001,46.240257": 30.72}, "scale": 0.01, "offset": -0.0}
+{"key": "chelsa/global/monthly/clt/2020/CHELSA_clt_08_2020_V.2.1.tif", "values": {"85.324000,27.717245": 58.94}, "scale": 0.01, "offset": -0.0}
+{"key": "chelsa/global/monthly/clt/2021/CHELSA_clt_07_2021_V.2.1.tif", "values": {"7.195001,46.240257": 41.410000000000004}, "scale": 0.01, "offset": -0.0}
+{"key": "chelsa/global/monthly/clt/2021/CHELSA_clt_08_2021_V.2.1.tif", "values": {"85.324000,27.717245": 78.52}, "scale": 0.01, "offset": -0.0}
+{"key": "chelsa/global/monthly/cmi/2014/CHELSA_cmi_07_2014_V.2.1.tif", "values": {"7.195001,46.240257": 347.70000000000005}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/cmi/2014/CHELSA_cmi_08_2014_V.2.1.tif", "values": {"85.324000,27.717245": 358.0}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/cmi/2015/CHELSA_cmi_07_2015_V.2.1.tif", "values": {"7.195001,46.240257": -3.8000000000000003}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/cmi/2015/CHELSA_cmi_08_2015_V.2.1.tif", "values": {"85.324000,27.717245": 499.40000000000003}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/cmi/2016/CHELSA_cmi_07_2016_V.2.1.tif", "values": {"7.195001,46.240257": 100.9}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/cmi/2016/CHELSA_cmi_08_2016_V.2.1.tif", "values": {"85.324000,27.717245": 150.8}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/cmi/2017/CHELSA_cmi_07_2017_V.2.1.tif", "values": {"7.195001,46.240257": 93.9}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/cmi/2017/CHELSA_cmi_08_2017_V.2.1.tif", "values": {"85.324000,27.717245": 300.1}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/cmi/2018/CHELSA_cmi_07_2018_V.2.1.tif", "values": {"7.195001,46.240257": 24.900000000000002}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/cmi/2018/CHELSA_cmi_08_2018_V.2.1.tif", "values": {"85.324000,27.717245": 241.60000000000002}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/hurs/2014/CHELSA_hurs_07_2014_V.2.1.tif", "values": {"7.195001,46.240257": 65.65}, "scale": 0.01, "offset": 0.0}
+{"key": "chelsa/global/monthly/hurs/2014/CHELSA_hurs_08_2014_V.2.1.tif", "values": {"85.324000,27.717245": 73.86}, "scale": 0.01, "offset": 0.0}
+{"key": "chelsa/global/monthly/hurs/2015/CHELSA_hurs_07_2015_V.2.1.tif", "values": {"7.195001,46.240257": 59.6}, "scale": 0.01, "offset": 0.0}
+{"key": "chelsa/global/monthly/hurs/2015/CHELSA_hurs_08_2015_V.2.1.tif", "values": {"85.324000,27.717245": 71.74}, "scale": 0.01, "offset": 0.0}
+{"key": "chelsa/global/monthly/hurs/2016/CHELSA_hurs_07_2016_V.2.1.tif", "values": {"7.195001,46.240257": 61.78}, "scale": 0.01, "offset": 0.0}
+{"key": "chelsa/global/monthly/hurs/2016/CHELSA_hurs_08_2016_V.2.1.tif", "values": {"85.324000,27.717245": 69.33}, "scale": 0.01, "offset": 0.0}
+{"key": "chelsa/global/monthly/hurs/2017/CHELSA_hurs_07_2017_V.2.1.tif", "values": {"7.195001,46.240257": 64.92}, "scale": 0.01, "offset": 0.0}
+{"key": "chelsa/global/monthly/hurs/2017/CHELSA_hurs_08_2017_V.2.1.tif", "values": {"85.324000,27.717245": 73.93}, "scale": 0.01, "offset": 0.0}
+{"key": "chelsa/global/monthly/hurs/2018/CHELSA_hurs_07_2018_V.2.1.tif", "values": {"7.195001,46.240257": 62.07}, "scale": 0.01, "offset": 0.0}
+{"key": "chelsa/global/monthly/hurs/2018/CHELSA_hurs_08_2018_V.2.1.tif", "values": {"85.324000,27.717245": 72.91}, "scale": 0.01, "offset": 0.0}
+{"key": "chelsa/global/monthly/pet/2014/CHELSA_pet_07_2014_V.2.1.tif", "values": {"7.195001,46.240257": 74.27}, "scale": 0.01, "offset": 0.0}
+{"key": "chelsa/global/monthly/pet/2014/CHELSA_pet_08_2014_V.2.1.tif", "values": {"85.324000,27.717245": 98.74000000000001}, "scale": 0.01, "offset": 0.0}
+{"key": "chelsa/global/monthly/pet/2015/CHELSA_pet_07_2015_V.2.1.tif", "values": {"7.195001,46.240257": 130.02}, "scale": 0.01, "offset": 0.0}
+{"key": "chelsa/global/monthly/pet/2015/CHELSA_pet_08_2015_V.2.1.tif", "values": {"85.324000,27.717245": 104.06}, "scale": 0.01, "offset": 0.0}
+{"key": "chelsa/global/monthly/pet/2016/CHELSA_pet_07_2016_V.2.1.tif", "values": {"7.195001,46.240257": 112.49000000000001}, "scale": 0.01, "offset": 0.0}
+{"key": "chelsa/global/monthly/pet/2016/CHELSA_pet_08_2016_V.2.1.tif", "values": {"85.324000,27.717245": 128.92000000000002}, "scale": 0.01, "offset": 0.0}
+{"key": "chelsa/global/monthly/pet/2017/CHELSA_pet_07_2017_V.2.1.tif", "values": {"7.195001,46.240257": 105.95}, "scale": 0.01, "offset": 0.0}
+{"key": "chelsa/global/monthly/pet/2017/CHELSA_pet_08_2017_V.2.1.tif", "values": {"85.324000,27.717245": 94.54}, "scale": 0.01, "offset": 0.0}
+{"key": "chelsa/global/monthly/pet/2018/CHELSA_pet_07_2018_V.2.1.tif", "values": {"7.195001,46.240257": 118.04}, "scale": 0.01, "offset": 0.0}
+{"key": "chelsa/global/monthly/pet/2018/CHELSA_pet_08_2018_V.2.1.tif", "values": {"85.324000,27.717245": 104.64}, "scale": 0.01, "offset": 0.0}
+{"key": "chelsa/global/monthly/pr/2017/CHELSA_pr_07_2017_V.2.1.tif", "values": {"7.195001,46.240257": 200.0}, "scale": 1.0, "offset": 0.0}
+{"key": "chelsa/global/monthly/pr/2017/CHELSA_pr_08_2017_V.2.1.tif", "values": {"85.324000,27.717245": 395.0}, "scale": 1.0, "offset": 0.0}
+{"key": "chelsa/global/monthly/pr/2018/CHELSA_pr_07_2018_V.2.1.tif", "values": {"7.195001,46.240257": 143.0}, "scale": 1.0, "offset": 0.0}
+{"key": "chelsa/global/monthly/pr/2018/CHELSA_pr_08_2018_V.2.1.tif", "values": {"85.324000,27.717245": 346.0}, "scale": 1.0, "offset": 0.0}
+{"key": "chelsa/global/monthly/pr/2019/CHELSA_pr_07_2019_V.2.1.tif", "values": {"7.195001,46.240257": 178.0}, "scale": 1.0, "offset": 0.0}
+{"key": "chelsa/global/monthly/pr/2019/CHELSA_pr_08_2019_V.2.1.tif", "values": {"85.324000,27.717245": 282.0}, "scale": 1.0, "offset": 0.0}
+{"key": "chelsa/global/monthly/pr/2020/CHELSA_pr_07_2020_V.2.1.tif", "values": {"7.195001,46.240257": 116.0}, "scale": 1.0, "offset": 0.0}
+{"key": "chelsa/global/monthly/pr/2020/CHELSA_pr_08_2020_V.2.1.tif", "values": {"85.324000,27.717245": 303.0}, "scale": 1.0, "offset": 0.0}
+{"key": "chelsa/global/monthly/pr/2021/CHELSA_pr_07_2021_V.2.1.tif", "values": {"7.195001,46.240257": 414.0}, "scale": 1.0, "offset": 0.0}
+{"key": "chelsa/global/monthly/pr/2021/CHELSA_pr_08_2021_V.2.1.tif", "values": {"85.324000,27.717245": 614.0}, "scale": 1.0, "offset": 0.0}
+{"key": "chelsa/global/monthly/rsds/2017/CHELSA_rsds_07_2017_V.2.1.tif", "values": {"7.195001,46.240257": 250.37037028224}, "scale": 0.01157407407, "offset": 0.0}
+{"key": "chelsa/global/monthly/rsds/2017/CHELSA_rsds_08_2017_V.2.1.tif", "values": {"85.324000,27.717245": 142.2453703203}, "scale": 0.01157407407, "offset": 0.0}
+{"key": "chelsa/global/monthly/rsds/2018/CHELSA_rsds_07_2018_V.2.1.tif", "values": {"7.195001,46.240257": 274.51388879226}, "scale": 0.01157407407, "offset": 0.0}
+{"key": "chelsa/global/monthly/rsds/2018/CHELSA_rsds_08_2018_V.2.1.tif", "values": {"85.324000,27.717245": 157.91666661108002}, "scale": 0.01157407407, "offset": 0.0}
+{"key": "chelsa/global/monthly/rsds/2019/CHELSA_rsds_07_2019_V.2.1.tif", "values": {"7.195001,46.240257": 263.14814805552004}, "scale": 0.01157407407, "offset": 0.0}
+{"key": "chelsa/global/monthly/rsds/2019/CHELSA_rsds_08_2019_V.2.1.tif", "values": {"85.324000,27.717245": 190.21990734045002}, "scale": 0.01157407407, "offset": 0.0}
+{"key": "chelsa/global/monthly/rsds/2020/CHELSA_rsds_07_2020_V.2.1.tif", "values": {"7.195001,46.240257": 274.71064805145}, "scale": 0.01157407407, "offset": 0.0}
+{"key": "chelsa/global/monthly/rsds/2020/CHELSA_rsds_08_2020_V.2.1.tif", "values": {"85.324000,27.717245": 172.60416660591002}, "scale": 0.01157407407, "offset": 0.0}
+{"key": "chelsa/global/monthly/rsds/2021/CHELSA_rsds_07_2021_V.2.1.tif", "values": {"7.195001,46.240257": 227.96296288272}, "scale": 0.01157407407, "offset": 0.0}
+{"key": "chelsa/global/monthly/rsds/2021/CHELSA_rsds_08_2021_V.2.1.tif", "values": {"85.324000,27.717245": 120.27777773544001}, "scale": 0.01157407407, "offset": 0.0}
+{"key": "chelsa/global/monthly/sfcWind/2014/CHELSA_sfcWind_07_2014_V.2.1.tif", "values": {"7.195001,46.240257": 4.76}, "scale": 0.01, "offset": 0.0}
+{"key": "chelsa/global/monthly/sfcWind/2014/CHELSA_sfcWind_08_2014_V.2.1.tif", "values": {"85.324000,27.717245": 0.8}, "scale": 0.01, "offset": 0.0}
+{"key": "chelsa/global/monthly/sfcWind/2015/CHELSA_sfcWind_07_2015_V.2.1.tif", "values": {"7.195001,46.240257": 5.3}, "scale": 0.01, "offset": 0.0}
+{"key": "chelsa/global/monthly/sfcWind/2015/CHELSA_sfcWind_08_2015_V.2.1.tif", "values": {"85.324000,27.717245": 0.8}, "scale": 0.01, "offset": 0.0}
+{"key": "chelsa/global/monthly/sfcWind/2016/CHELSA_sfcWind_07_2016_V.2.1.tif", "values": {"7.195001,46.240257": 4.84}, "scale": 0.01, "offset": 0.0}
+{"key": "chelsa/global/monthly/sfcWind/2016/CHELSA_sfcWind_08_2016_V.2.1.tif", "values": {"85.324000,27.717245": 0.76}, "scale": 0.01, "offset": 0.0}
+{"key": "chelsa/global/monthly/sfcWind/2017/CHELSA_sfcWind_07_2017_V.2.1.tif", "values": {"7.195001,46.240257": 5.11}, "scale": 0.01, "offset": 0.0}
+{"key": "chelsa/global/monthly/sfcWind/2017/CHELSA_sfcWind_08_2017_V.2.1.tif", "values": {"85.324000,27.717245": 0.85}, "scale": 0.01, "offset": 0.0}
+{"key": "chelsa/global/monthly/sfcWind/2018/CHELSA_sfcWind_07_2018_V.2.1.tif", "values": {"7.195001,46.240257": 5.08}, "scale": 0.01, "offset": 0.0}
+{"key": "chelsa/global/monthly/sfcWind/2018/CHELSA_sfcWind_08_2018_V.2.1.tif", "values": {"85.324000,27.717245": 0.79}, "scale": 0.01, "offset": 0.0}
+{"key": "chelsa/global/monthly/spei12/2014/CHELSA_spei12_07_2014_V.2.1.tif", "values": {"7.195001,46.240257": 0.4399999999999977}, "scale": 0.01, "offset": -300.0}
+{"key": "chelsa/global/monthly/spei12/2014/CHELSA_spei12_08_2014_V.2.1.tif", "values": {"85.324000,27.717245": -0.8299999999999841}, "scale": 0.01, "offset": -300.0}
+{"key": "chelsa/global/monthly/spei12/2015/CHELSA_spei12_07_2015_V.2.1.tif", "values": {"7.195001,46.240257": -0.46999999999997044}, "scale": 0.01, "offset": -300.0}
+{"key": "chelsa/global/monthly/spei12/2015/CHELSA_spei12_08_2015_V.2.1.tif", "values": {"85.324000,27.717245": 0.8500000000000227}, "scale": 0.01, "offset": -300.0}
+{"key": "chelsa/global/monthly/spei12/2016/CHELSA_spei12_07_2016_V.2.1.tif", "values": {"7.195001,46.240257": 1.3199999999999932}, "scale": 0.01, "offset": -300.0}
+{"key": "chelsa/global/monthly/spei12/2016/CHELSA_spei12_08_2016_V.2.1.tif", "values": {"85.324000,27.717245": -0.9599999999999795}, "scale": 0.01, "offset": -300.0}
+{"key": "chelsa/global/monthly/spei12/2017/CHELSA_spei12_07_2017_V.2.1.tif", "values": {"7.195001,46.240257": -1.6399999999999864}, "scale": 0.01, "offset": -300.0}
+{"key": "chelsa/global/monthly/spei12/2017/CHELSA_spei12_08_2017_V.2.1.tif", "values": {"85.324000,27.717245": 0.19999999999998863}, "scale": 0.01, "offset": -300.0}
+{"key": "chelsa/global/monthly/spei12/2018/CHELSA_spei12_07_2018_V.2.1.tif", "values": {"7.195001,46.240257": 0.18000000000000682}, "scale": 0.01, "offset": -300.0}
+{"key": "chelsa/global/monthly/spei12/2018/CHELSA_spei12_08_2018_V.2.1.tif", "values": {"85.324000,27.717245": -0.18999999999999773}, "scale": 0.01, "offset": -300.0}
+{"key": "chelsa/global/monthly/spi12/2014/CHELSA_spi12_07_2014_V.2.1.tif", "values": {"7.195001,46.240257": -0.01999999999998181}, "scale": 0.01, "offset": -300.0}
+{"key": "chelsa/global/monthly/spi12/2014/CHELSA_spi12_08_2014_V.2.1.tif", "values": {"85.324000,27.717245": 0.35000000000002274}, "scale": 0.01, "offset": -300.0}
+{"key": "chelsa/global/monthly/spi12/2015/CHELSA_spi12_07_2015_V.2.1.tif", "values": {"7.195001,46.240257": -1.240000000000009}, "scale": 0.01, "offset": -300.0}
+{"key": "chelsa/global/monthly/spi12/2015/CHELSA_spi12_08_2015_V.2.1.tif", "values": {"85.324000,27.717245": -0.9800000000000182}, "scale": 0.01, "offset": -300.0}
+{"key": "chelsa/global/monthly/spi12/2016/CHELSA_spi12_07_2016_V.2.1.tif", "values": {"7.195001,46.240257": 1.1399999999999864}, "scale": 0.01, "offset": -300.0}
+{"key": "chelsa/global/monthly/spi12/2016/CHELSA_spi12_08_2016_V.2.1.tif", "values": {"85.324000,27.717245": -0.4300000000000068}, "scale": 0.01, "offset": -300.0}
+{"key": "chelsa/global/monthly/spi12/2017/CHELSA_spi12_07_2017_V.2.1.tif", "values": {"7.195001,46.240257": -1.7799999999999727}, "scale": 0.01, "offset": -300.0}
+{"key": "chelsa/global/monthly/spi12/2017/CHELSA_spi12_08_2017_V.2.1.tif", "values": {"85.324000,27.717245": 1.829999999999984}, "scale": 0.01, "offset": -300.0}
+{"key": "chelsa/global/monthly/spi12/2018/CHELSA_spi12_07_2018_V.2.1.tif", "values": {"7.195001,46.240257": 0.410000000000025}, "scale": 0.01, "offset": -300.0}
+{"key": "chelsa/global/monthly/spi12/2018/CHELSA_spi12_08_2018_V.2.1.tif", "values": {"85.324000,27.717245": 0.6700000000000159}, "scale": 0.01, "offset": -300.0}
+{"key": "chelsa/global/monthly/tas/2017/CHELSA_tas_07_2017_V.2.1.tif", "values": {"7.195001,46.240257": 280.6}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/tas/2017/CHELSA_tas_08_2017_V.2.1.tif", "values": {"85.324000,27.717245": 296.8}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/tas/2018/CHELSA_tas_07_2018_V.2.1.tif", "values": {"7.195001,46.240257": 281.5}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/tas/2018/CHELSA_tas_08_2018_V.2.1.tif", "values": {"85.324000,27.717245": 296.8}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/tas/2019/CHELSA_tas_07_2019_V.2.1.tif", "values": {"7.195001,46.240257": 281.90000000000003}, "scale": 0.1, "offset": -0.0}
+{"key": "chelsa/global/monthly/tas/2019/CHELSA_tas_08_2019_V.2.1.tif", "values": {"85.324000,27.717245": 297.6}, "scale": 0.1, "offset": -0.0}
+{"key": "chelsa/global/monthly/tas/2020/CHELSA_tas_07_2020_V.2.1.tif", "values": {"7.195001,46.240257": 281.0}, "scale": 0.1, "offset": -0.0}
+{"key": "chelsa/global/monthly/tas/2020/CHELSA_tas_08_2020_V.2.1.tif", "values": {"85.324000,27.717245": 297.2}, "scale": 0.1, "offset": -0.0}
+{"key": "chelsa/global/monthly/tas/2021/CHELSA_tas_07_2021_V.2.1.tif", "values": {"7.195001,46.240257": 279.6}, "scale": 0.1, "offset": -0.0}
+{"key": "chelsa/global/monthly/tas/2021/CHELSA_tas_08_2021_V.2.1.tif", "values": {"85.324000,27.717245": 296.5}, "scale": 0.1, "offset": -0.0}
+{"key": "chelsa/global/monthly/tasmax/2017/CHELSA_tasmax_07_2017_V.2.1.tif", "values": {"7.195001,46.240257": 285.0}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/tasmax/2017/CHELSA_tasmax_08_2017_V.2.1.tif", "values": {"85.324000,27.717245": 298.3}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/tasmax/2018/CHELSA_tasmax_07_2018_V.2.1.tif", "values": {"7.195001,46.240257": 286.0}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/tasmax/2018/CHELSA_tasmax_08_2018_V.2.1.tif", "values": {"85.324000,27.717245": 298.7}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/tasmax/2019/CHELSA_tasmax_07_2019_V.2.1.tif", "values": {"7.195001,46.240257": 286.1}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/tasmax/2019/CHELSA_tasmax_08_2019_V.2.1.tif", "values": {"85.324000,27.717245": 299.5}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/tasmax/2020/CHELSA_tasmax_07_2020_V.2.1.tif", "values": {"7.195001,46.240257": 285.1}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/tasmax/2020/CHELSA_tasmax_08_2020_V.2.1.tif", "values": {"85.324000,27.717245": 298.90000000000003}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/tasmax/2021/CHELSA_tasmax_07_2021_V.2.1.tif", "values": {"7.195001,46.240257": 283.8}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/tasmax/2021/CHELSA_tasmax_08_2021_V.2.1.tif", "values": {"85.324000,27.717245": 297.6}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/tasmin/2017/CHELSA_tasmin_07_2017_V.2.1.tif", "values": {"7.195001,46.240257": 274.1}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/tasmin/2017/CHELSA_tasmin_08_2017_V.2.1.tif", "values": {"85.324000,27.717245": 293.40000000000003}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/tasmin/2018/CHELSA_tasmin_07_2018_V.2.1.tif", "values": {"7.195001,46.240257": 274.7}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/tasmin/2018/CHELSA_tasmin_08_2018_V.2.1.tif", "values": {"85.324000,27.717245": 293.6}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/tasmin/2019/CHELSA_tasmin_07_2019_V.2.1.tif", "values": {"7.195001,46.240257": 275.1}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/tasmin/2019/CHELSA_tasmin_08_2019_V.2.1.tif", "values": {"85.324000,27.717245": 293.40000000000003}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/tasmin/2020/CHELSA_tasmin_07_2020_V.2.1.tif", "values": {"7.195001,46.240257": 274.2}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/tasmin/2020/CHELSA_tasmin_08_2020_V.2.1.tif", "values": {"85.324000,27.717245": 293.6}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/tasmin/2021/CHELSA_tasmin_07_2021_V.2.1.tif", "values": {"7.195001,46.240257": 273.2}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/tasmin/2021/CHELSA_tasmin_08_2021_V.2.1.tif", "values": {"85.324000,27.717245": 293.40000000000003}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/vpd/2014/CHELSA_vpd_07_2014_V.2.1.tif", "values": {"7.195001,46.240257": 250.3}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/vpd/2014/CHELSA_vpd_08_2014_V.2.1.tif", "values": {"85.324000,27.717245": 743.7}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/vpd/2015/CHELSA_vpd_07_2015_V.2.1.tif", "values": {"7.195001,46.240257": 493.70000000000005}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/vpd/2015/CHELSA_vpd_08_2015_V.2.1.tif", "values": {"85.324000,27.717245": 818.7}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/vpd/2016/CHELSA_vpd_07_2016_V.2.1.tif", "values": {"7.195001,46.240257": 394.5}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/vpd/2016/CHELSA_vpd_08_2016_V.2.1.tif", "values": {"85.324000,27.717245": 921.2}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/vpd/2017/CHELSA_vpd_07_2017_V.2.1.tif", "values": {"7.195001,46.240257": 362.0}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/vpd/2017/CHELSA_vpd_08_2017_V.2.1.tif", "values": {"85.324000,27.717245": 759.8000000000001}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/vpd/2018/CHELSA_vpd_07_2018_V.2.1.tif", "values": {"7.195001,46.240257": 416.20000000000005}, "scale": 0.1, "offset": 0.0}
+{"key": "chelsa/global/monthly/vpd/2018/CHELSA_vpd_08_2018_V.2.1.tif", "values": {"85.324000,27.717245": 789.6}, "scale": 0.1, "offset": 0.0}
