@@ -59,8 +59,8 @@ from urllib3.util.retry import Retry
 # --------------------------------------------------------------------------- settings
 PROJECT_DIR = Path("../epfl-altshuler/GlobalAlpineSoilMicrobiome")
 POINTS_CSV = PROJECT_DIR / "data/points.csv"
-OUT_CSV = PROJECT_DIR / "data/chelsa_climate.csv"
-PROV_CSV = PROJECT_DIR / "data/chelsa_climate_provenance.csv"
+OUT_CSV = PROJECT_DIR / "data/chelsa_data.csv"
+PROV_CSV = PROJECT_DIR / "data/chelsa_data_provenance.csv"
 TMP_DIR = PROJECT_DIR / "data/tmp"
 PLAN_CSV = TMP_DIR / "chelsa_plan.csv"
 CACHE_JSONL = TMP_DIR / "chelsa_cache.jsonl"

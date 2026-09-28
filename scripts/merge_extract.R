@@ -9,9 +9,9 @@ suppressPackageStartupMessages({
   library(arrow)
 })
 
-chelsa_csv <- 'data/chelsa_climate.csv'
-soil_csv <- 'data/soilgrids_soil.csv'
-other_csv <- 'data/other_data.csv'
+chelsa_csv <- '/home/renku/work/GlobalAlpineSoilMicrobiome/data/chelsa_data.csv'
+soil_csv <- '/home/renku/work/GlobalAlpineSoilMicrobiome/data/soilgrids_data.csv'
+other_csv <- '/home/renku/work/GlobalAlpineSoilMicrobiome/data/other_data.csv'
 
 final_csv <- 'results/all_downloaded_data.csv'
 
