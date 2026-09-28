@@ -9,7 +9,7 @@ suppressPackageStartupMessages({
   library(arrow)
 })
 
-chelsa_parq <- 'data/chelsa_climate.csv'
+chelsa_csv <- 'data/chelsa_climate.csv'
 soil_csv <- 'data/soilgrids_soil.csv'
 other_csv <- 'data/other_data.csv'
 
