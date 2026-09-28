@@ -9,19 +9,19 @@ suppressPackageStartupMessages({
   library(arrow)
 })
 
-chelsa_parq <- 'results/chelsa_climate.parquet'
-soil_csv <- 'results/soilgrids_sampled.csv'
-other_parq <- 'results/other_data.parquet'
-final_csv <- 'results/sampled_soilgrids_r.csv'
-final_parq <- 'results/sampled_soilgrids.parquet'
+chelsa_parq <- 'data/chelsa_climate.csv'
+soil_csv <- 'data/soilgrids_soil.csv'
+other_csv <- 'data/other_data.csv'
 
-if(!file.exists(chelsa_parq)) stop('Missing ', chelsa_parq)
+final_csv <- 'results/all_downloaded_data.csv'
+
+if(!file.exists(chelsa_csv)) stop('Missing ', chelsa_csv)
 if(!file.exists(soil_csv)) stop('Missing ', soil_csv)
-if(!file.exists(other_parq)) stop('Missing ', other_parq)
+if(!file.exists(other_csv)) stop('Missing ', other_csv)
 
-chelsa <- arrow::read_parquet(chelsa_parq)
+chelsa <- read.csv(chelsa_csv, stringsAsFactors = FALSE)
 soil <- read.csv(soil_csv, stringsAsFactors = FALSE)
-other <- arrow::read_parquet(other_parq)
+other <- read.csv(other_csv, stringsAsFactors = FALSE)
 
 # left join in order: chelsa <- soil <- other by site, keep chelsa order
 merged <- chelsa %>%
@@ -29,5 +29,4 @@ merged <- chelsa %>%
   left_join(other, by = 'site')
 
 write.csv(merged, final_csv, row.names = FALSE)
-arrow::write_parquet(merged, final_parq)
-cat('Wrote', final_csv, 'and', final_parq, '\n')
+cat('Wrote', final_csv, '\n')
