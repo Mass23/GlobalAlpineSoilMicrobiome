@@ -13,5 +13,5 @@ dependencies:
   - r-vegan
   - r-geosphere
   - r-slam
-  - bioconductor-rbiom
+  - r-rbiom
   - bioconductor-phyloseq
