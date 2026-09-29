@@ -1,7 +1,7 @@
 # Ignore runtime results and caches
 .snakemake
 results/
-data/tiles/
+data/
 .env
 .Rhistory
 .RData
