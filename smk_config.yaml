@@ -2,5 +2,5 @@
 cores: 16 
 
 # Paths 
-data_folder: "work/epfl-altshuler/GlobalAlpineSoilMicrobiome/data" 
-output_dir: "work/epfl-altshuler/GlobalAlpineSoilMicrobiome/results"
+data_folder: "/home/renku/work/epfl-altshuler/GlobalAlpineSoilMicrobiome/data" 
+output_dir: "/home/renku/work/epfl-altshuler/GlobalAlpineSoilMicrobiome/results"
