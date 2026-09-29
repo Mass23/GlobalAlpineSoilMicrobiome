@@ -4,11 +4,37 @@ OTHER_CSV = '/home/renku/work/GlobalAlpineSoilMicrobiome/data/other_data.csv'
 
 ALL_DATA_CSV  = '/home/renku/work/GlobalAlpineSoilMicrobiome/results/all_sampled_data.csv'
 
+SAMPLE_DATA_FILTERED = 'data/sample_data_filtered.csv'
 DATA_POINTS = 'data/points.csv'
 
 rule all:
     input:
         ALL_DATA_CSV
+
+rule prepare_microbeatlas_data:
+    output:
+        SAMPLE_DATA_FILTERED
+    conda:
+        "envs/microbeatlas/environment.yml"
+    shell:
+        """
+        Rscript scripts/0a_microbeatlas_data.R
+        """
+
+rule prepare_points:
+    input:
+        SAMPLE_DATA_FILTERED
+    output:
+        DATA_POINTS
+    run:
+        import pandas as pd
+
+        df = pd.read_csv(input[0])
+
+        points = df[["Sample_acc", "Latitude", "Longitude", "depth_cm", "sample_date"]].copy()
+        points.columns = ["site", "lat", "lon", "depth_cm", "sample_date"]
+
+        points.to_csv(output[0], index=False)
 
 rule download_chelsa:
     input:
@@ -92,4 +118,3 @@ rule download_earth_data:
             f"Wrote {output[0]}: "
             f"{len(merged)} rows, {len(merged.columns)} columns"
         )
-
