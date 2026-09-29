@@ -35,8 +35,10 @@ rule prepare_points:
 
         df = pd.read_csv(input[0])
 
-        points = df[["Sample_acc", "Latitude", "Longitude", "depth_cm", "sample_date"]].copy()
-        points.columns = ["site", "lat", "lon", "depth_cm", "sample_date"]
+        points = df[["Sample_acc", "Latitude", "Longitude", "Depth_m", "Date_collected"]].copy()
+        points.columns = ["site", "lat", "lon", "depth_m", "sample_date"]
+        points["depth_cm"] = points["depth_m"] * 100
+        points = points.drop(columns=["depth_M"])
 
         points.to_csv(output[0], index=False)
 
