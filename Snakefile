@@ -1,3 +1,5 @@
+configfile: "smk_config.yaml"
+
 CHELSA_CSV = '/home/renku/work/GlobalAlpineSoilMicrobiome/data/chelsa_data.csv'
 SOIL_CSV = '/home/renku/work/GlobalAlpineSoilMicrobiome/data/soilgrids_data.csv'
 OTHER_CSV = '/home/renku/work/GlobalAlpineSoilMicrobiome/data/other_data.csv'
