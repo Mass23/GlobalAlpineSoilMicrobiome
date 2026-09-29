@@ -16,9 +16,11 @@ rule prepare_microbeatlas_data:
         SAMPLE_DATA_FILTERED
     conda:
         "envs/microbeatlas/environment.yml"
+    params:
+        data_folder=config["params"]["data_folder"]
     shell:
         """
-        Rscript scripts/microbeatlas_filter_data.R
+        Rscript scripts/microbeatlas_filter_data.R {params.data_folder}
         """
 
 rule prepare_points:

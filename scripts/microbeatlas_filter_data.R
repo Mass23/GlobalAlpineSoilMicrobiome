@@ -12,6 +12,9 @@ library(vegan)
 library(phyloseq)
 library(geosphere)
 
+args <- commandArgs(trailingOnly = TRUE)
+data_folder = as.character(args[1])
+
 add_alpha_metrics_batched <- function(biom_file, metadata,
                                              id_col = "Accessions",
                                              batch_size = 1000) {
@@ -82,10 +85,7 @@ add_alpha_metrics_batched <- function(biom_file, metadata,
   return(metadata)
 }
 
-
-setwd('~/Documents/MACE/AlpineSoilMicrobiome')
-
-sample_env = read.csv('data/microbeatlas/metadata_soilCurated_OTU97_nextMAPrelease.tsv', sep='\t', header = T)
+sample_env = read.csv(file.path(data_folder, 'microbeatlas/metadata_soilCurated_OTU97_nextMAPrelease.tsv'), sep='\t', header = T)
 sample_env = sample_env %>% mutate(Accessions = MAP_SID) %>%
   separate(MAP_SID, into = c("Reads_acc", "Sample_acc"), sep = "\\.")
 
@@ -108,7 +108,7 @@ sample_env_geo = sample_env_geo %>% filter(Latitude < 90)
 
 # Keep only samples that fall on Land
 # Based on this: https://www.naturalearthdata.com/downloads/10m-physical-vectors/
-land <- vect("data/ne_10m_land/ne_10m_land.shp")
+land <- vect(file.path(data_folder, "ne_10m_land/ne_10m_land.shp"))
 pts <- vect(sample_env_geo, geom = c("Longitude", "Latitude"), crs = "EPSG:4326")
 on_land <- extract(land, pts)
 to_keep = na.omit(on_land[on_land[,2] == 'Land',1])
@@ -117,7 +117,7 @@ sample_env_land <- sample_env_geo[on_land[,2] == 'Land',]
 
 # Categorise Alpine samples
 # Based on this: https://figshare.com/articles/dataset/Global_distribution_and_bioclimatic_characterization_of_alpine_biomes/11710002?file=33157427
-v <- vect("data/global_alpine_30m_v1_1/global_alpine_30m_v1_1.shp")
+v <- vect(file.path(data_folder, "global_alpine_30m_v1_1/global_alpine_30m_v1_1.shp"))
 alpine_union <- aggregate(v)
 pts <- vect(sample_env_land %>% dplyr::select("Longitude", "Latitude") %>% rename(lon=Longitude, lat=Latitude), crs = "EPSG:4326")
 alpine <- extract(v, pts)
@@ -135,7 +135,7 @@ table(sample_env_alpine$Alpine)
 
 
 
-biom_file <- read_biom("data/microbeatlas/otuTable_soilCurated_OTU97_nextMAPrelease.biom")
+biom_file <- read_biom(file.path(data_folder, "microbeatlas/otuTable_soilCurated_OTU97_nextMAPrelease.biom"))
 table(sample_env_alpine$Accessions %in% biom_file$samples)
 
 biom_filtered <- biom_file[sample_env_alpine$Accessions]
