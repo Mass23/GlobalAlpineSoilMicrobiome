@@ -18,7 +18,7 @@ rule prepare_microbeatlas_data:
         "envs/microbeatlas/environment.yml"
     shell:
         """
-        Rscript scripts/0a_microbeatlas_data.R
+        Rscript scripts/microbeatlas_filter_data.R
         """
 
 rule prepare_points:
