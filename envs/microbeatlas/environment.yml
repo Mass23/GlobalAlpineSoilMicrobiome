@@ -1,0 +1,17 @@
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - r-base>=4.3
+  - r-tidyverse
+  - r-maps
+  - r-raster
+  - r-terra
+  - r-data.table
+  - r-sf
+  - r-vegan
+  - r-geosphere
+  - r-slam
+  - bioconductor-rbiom
+  - bioconductor-phyloseq
