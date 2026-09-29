@@ -19,7 +19,7 @@ rule prepare_microbeatlas_data:
     conda:
         "envs/microbeatlas/environment.yml"
     params:
-        data_folder=config["params"]["data_folder"]
+        data_folder=config["data_folder"]
     shell:
         """
         Rscript scripts/microbeatlas_filter_data.R {params.data_folder}
