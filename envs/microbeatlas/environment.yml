@@ -14,4 +14,9 @@ dependencies:
   - r-geosphere
   - r-slam
   - r-rbiom
+  - r-h5lite
   - bioconductor-phyloseq
+  - proj 
+  - proj-data
+  - gdal
+  - rasterio
