@@ -1,0 +1,34 @@
+name: alpine-soil-r
+# One environment for all R analyses:
+#   microbeatlas_filter_data.R, 1_alpha_overview.R, 2_alpha_beta_elevation_latitude.R
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - r-base>=4.3
+
+  # data wrangling and plotting (dplyr, tidyr, ggplot2, purrr, scales)
+  - r-tidyverse
+  - r-data.table
+
+  # statistics (GAMs, sparse matrices) and ecology (diversity, dissimilarities)
+  - r-mgcv
+  - r-matrix
+  - r-vegan
+
+  # microbiome data: BIOM files (HDF5 BIOM needs h5lite), sparse triplet matrices
+  - r-rbiom
+  - r-h5lite
+  - r-slam
+  - bioconductor-phyloseq     # still loaded by microbeatlas_filter_data.R
+
+  # spatial: land / alpine polygons, coordinates, distances, maps
+  - r-terra
+  - r-raster
+  - r-sf
+  - r-geosphere
+  - r-maps
+  - proj
+  - proj-data
+  - gdal
