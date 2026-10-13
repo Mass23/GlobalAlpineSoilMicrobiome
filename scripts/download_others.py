@@ -15,8 +15,11 @@ Writes  ../epfl-altshuler/GlobalAlpineSoilMicrobiome/data/other_data.csv
         data/tmp/other_data_cache.jsonl               fetched pixels; lets an interrupted run resume
 
 MODIS doesn't publish a DEM; the nearest global 30 m product is Copernicus DEM GLO-30 (2019-2021
-TanDEM-X-derived, WGS84 lon/lat tiles, no login). It's read through Microsoft Planetary Computer's
-public STAC catalogue and Azure blob storage (free per-request SAS tokens, no account needed).
+TanDEM-X-derived, WGS84 lon/lat tiles, no login). DEM_SOURCE = "aws" (default) reads its public COG tiles
+from the AWS Open Data bucket by tile name: no search, no token, no account. DEM_SOURCE = "planetary"
+reads the same product through Microsoft Planetary Computer's STAC catalogue (which may answer 403 to
+anonymous bursts: then set PC_SDK_SUBSCRIPTION_KEY, see make_session). NDVI always needs Planetary
+Computer; FETCH_NDVI = False skips it (the NDVI columns stay NA).
 
 Terrain variables (from a small window of the DEM centred on each point):
   elevation_m          centre-pixel elevation
@@ -46,6 +49,7 @@ the CHELSA extraction as `scd`).
 import json
 import logging
 import math
+import os
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -96,8 +100,12 @@ VSICURL_ENV = dict(
     GDAL_HTTP_RETRY_DELAY="3",
     GDAL_HTTP_TIMEOUT="120",
 )
-N_WORKERS = 6
+N_WORKERS = 3                                   # polite: bursts are what gets anonymous clients refused
 TRIES = 3
+DEM_SOURCE = "aws"                              # "aws" (public tiles, no search) | "planetary" (STAC search)
+DEM_AWS_BASE = "https://copernicus-dem-30m.s3.amazonaws.com"
+FETCH_NDVI = False                              # NDVI needs Planetary Computer; True to fetch it
+MAX_CONSECUTIVE_FAILURES = 25                   # stop instead of hammering a service that keeps refusing
 DEG_M = 111_320.0                               # metres per degree of latitude (WGS84, near enough)
 
 log = logging.getLogger("other_data")
@@ -109,6 +117,10 @@ def coord_key(lon: float, lat: float) -> str:
 
 def make_session() -> requests.Session:
     s = requests.Session()
+    s.headers["User-Agent"] = "GlobalAlpineSoilMicrobiome-download_others/1.0 (research use)"
+    key = os.environ.get("PC_SDK_SUBSCRIPTION_KEY")      # optional: less restricted rate limiting on Planetary Computer
+    if key:
+        s.headers["Ocp-Apim-Subscription-Key"] = key
     retry = Retry(total=6, backoff_factor=2, status_forcelist=(429, 500, 502, 503, 504))
     s.mount("https://", HTTPAdapter(max_retries=retry))
     s.mount("http://", HTTPAdapter(max_retries=retry))
@@ -160,12 +172,26 @@ def read_window(url: str, lon: float, lat: float, half: int):
     return arr, px_x, px_y
 
 
+def dem_tile_url(lon: float, lat: float) -> str:
+    """public Copernicus GLO-30 COG tile (1 x 1 degree, named by its south-west corner)"""
+    lat0, lon0 = math.floor(lat), math.floor(lon)
+    name = (f"Copernicus_DSM_COG_10_{'N' if lat0 >= 0 else 'S'}{abs(lat0):02d}_00_"
+            f"{'E' if lon0 >= 0 else 'W'}{abs(lon0):03d}_00_DEM")
+    return f"{DEM_AWS_BASE}/{name}/{name}.tif"
+
+
 def fetch_dem_window(pc: Planetary, lon: float, lat: float):
-    feats = pc.search(DEM_COLLECTION, lon, lat, eps=0.01)
-    if not feats:
-        return None
-    href = pc.sign(DEM_COLLECTION, feats[0]["assets"][DEM_ASSET]["href"])
-    arr, px_x_deg, px_y_deg = read_window(href, lon, lat, DEM_TPI_RADIUS)
+    if DEM_SOURCE == "aws":
+        try:
+            arr, px_x_deg, px_y_deg = read_window(dem_tile_url(lon, lat), lon, lat, DEM_TPI_RADIUS)
+        except rasterio.errors.RasterioIOError:      # no tile (open ocean has none) or unreadable
+            return None
+    else:
+        feats = pc.search(DEM_COLLECTION, lon, lat, eps=0.01)
+        if not feats:
+            return None
+        href = pc.sign(DEM_COLLECTION, feats[0]["assets"][DEM_ASSET]["href"])
+        arr, px_x_deg, px_y_deg = read_window(href, lon, lat, DEM_TPI_RADIUS)
     return {
         "grid": [[None if np.ma.is_masked(v) else float(v) for v in row] for row in arr],
         "px_x_deg": px_x_deg, "px_y_deg": px_y_deg,
@@ -335,7 +361,7 @@ def main() -> int:
              " (terrain kept)" if KEEP_STATIC_WHEN_DATE_UNUSABLE else "")
     dem_keys = sorted({coord_key(lon[i], lat[i]) for i in np.flatnonzero(need_dem)})
     ndvi_keys = sorted({(coord_key(lon[i], lat[i]), dates.iloc[i].date().isoformat())
-                        for i in np.flatnonzero(usable)})
+                        for i in np.flatnonzero(usable)}) if FETCH_NDVI else []
     log.info("%d points, %d unique coordinates, %d unique coordinate x date pairs", len(df), len(dem_keys),
              len(ndvi_keys))
 
@@ -348,6 +374,14 @@ def main() -> int:
     session = make_session()
     pc = Planetary(session)
     failed = {}
+    if dem_todo:                                   # one known land tile (the Alps): fail early, with the reason
+        try:
+            ok = fetch_dem_window(pc, 8.5, 46.5)
+        except Exception as e:
+            raise RuntimeError(f"DEM preflight failed (DEM_SOURCE = {DEM_SOURCE!r}): {e}") from e
+        if ok is None:
+            raise RuntimeError(f"DEM preflight: no DEM pixel at 8.5E 46.5N (DEM_SOURCE = {DEM_SOURCE!r}); "
+                               f"check the network / the tile URL {dem_tile_url(8.5, 46.5)}")
     with ThreadPoolExecutor(N_WORKERS) as pool:
         futs = {}
         for ck in dem_todo:
@@ -356,13 +390,23 @@ def main() -> int:
         for ck, d in ndvi_todo:
             lo, la = map(float, ck.split(","))
             futs[pool.submit(fetch_ndvi, pc, lo, la, datetime.fromisoformat(d).date())] = ("ndvi", f"{ck}|{d}")
+        consecutive = 0
         for i, fut in enumerate(as_completed(futs), 1):
             kind, key = futs[fut]
             try:
                 cache.add(kind, key, fut.result())
+                consecutive = 0
             except Exception as e:
                 failed[(kind, key)] = str(e)
+                consecutive += 1
                 log.error("FAILED %s %s: %s", kind, key, str(e)[:200])
+                if consecutive >= MAX_CONSECUTIVE_FAILURES:
+                    for f in futs:
+                        f.cancel()
+                    log.error("%d requests in a row failed: stopping (cached values are kept; rerun later). "
+                              "HTTP 403 from Planetary Computer: set PC_SDK_SUBSCRIPTION_KEY, or use "
+                              "DEM_SOURCE = 'aws' / FETCH_NDVI = False.", consecutive)
+                    break
             if i % 20 == 0 or i == len(futs):
                 log.info("  %d/%d requests done", i, len(futs))
 
@@ -385,7 +429,7 @@ def main() -> int:
                 row.update(terr)
         else:                                   # year only / unusable date: NA everywhere
             row.update({c: np.nan for c in terrain_cols})
-        if usable[i]:
+        if usable[i] and FETCH_NDVI:
             d = dates.iloc[i].date().isoformat()
             nrec = cache.data.get(("ndvi", f"{ck}|{d}"))
             if nrec is None:
