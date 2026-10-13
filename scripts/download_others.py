@@ -1,25 +1,17 @@
 #!/usr/bin/env python3
 """
-Terrain (Copernicus DEM GLO-30) and vegetation index (MODIS NDVI) at sampling points.
+Terrain (Copernicus DEM GLO-30) at sampling points.
 
-All paths below are relative to the Snakefile's folder (matches chelsa_climate.py /
-soilgrids_soil.py, called "other_data" in the Snakefile).
-Reads   data/points.csv                              columns lat, lon, sample_date
-        sample_date may be yyyy-mm-dd, yyyy-mm (taken as the 15th: the NDVI composite is searched around
-        it) or yyyy: a point with only a YEAR (or an unreadable date) gets NA in EVERY output column,
-        the terrain ones too (set KEEP_STATIC_WHEN_DATE_UNUSABLE = True to keep the date-independent
-        terrain values for those points)
 Run     python3 download_others.py [points.csv other_data.csv]   (Snakemake passes the two paths; the
         tmp/ cache is written next to the output)
-Writes  ../epfl-altshuler/GlobalAlpineSoilMicrobiome/data/other_data.csv
-        data/tmp/other_data_cache.jsonl               fetched pixels; lets an interrupted run resume
+Reads   points.csv      columns lat, lon; all other columns are kept in the output (the date is not used)
+Writes  other_data.csv  points + the terrain columns below
+        tmp/other_data_cache.jsonl   fetched pixels; lets an interrupted run resume
 
-MODIS doesn't publish a DEM; the nearest global 30 m product is Copernicus DEM GLO-30 (2019-2021
-TanDEM-X-derived, WGS84 lon/lat tiles, no login). DEM_SOURCE = "aws" (default) reads its public COG tiles
-from the AWS Open Data bucket by tile name: no search, no token, no account. DEM_SOURCE = "planetary"
-reads the same product through Microsoft Planetary Computer's STAC catalogue (which may answer 403 to
-anonymous bursts: then set PC_SDK_SUBSCRIPTION_KEY, see make_session). NDVI always needs Planetary
-Computer; FETCH_NDVI = False skips it (the NDVI columns stay NA).
+Copernicus DEM GLO-30 (2019-2021 TanDEM-X-derived, WGS84 lon/lat tiles, no login). DEM_SOURCE = "aws"
+(default) reads its public COG tiles from the AWS Open Data bucket by tile name: no search, no token, no
+account. DEM_SOURCE = "planetary" reads the same product through Microsoft Planetary Computer's STAC
+catalogue (which may answer 403 to anonymous bursts: then set PC_SDK_SUBSCRIPTION_KEY, see make_session).
 
 Terrain variables (from a small window of the DEM centred on each point):
   elevation_m          centre-pixel elevation
@@ -31,15 +23,7 @@ Terrain variables (from a small window of the DEM centred on each point):
   roughness_m           terrain ruggedness index: RMS elevation difference to the 3x3 neighbours
 A point within ~1 pixel of a DEM tile edge gets a smaller, boundless-padded window; too few valid
 pixels around a point (open water, a DEM void) leaves these columns empty and is noted in the log.
-
-Vegetation index: MODIS MOD13Q1 v061, 250 m, 16-day composites (search: modis-13Q1-061), read the
-same way. For each point the composite closest in time to sample_date is used, searching outward
-(+-96 days) until one with a good/marginal pixel-reliability flag is found; otherwise the nearest
-available value is used and flagged.
-  ndvi                  NDVI of the composite used (-1 to 1)
-  ndvi_date             date of that composite (yyyy-mm-dd)
-  ndvi_days_offset       composite date minus sample_date, in days (0 = exact 16-day period)
-  ndvi_reliability       0 good, 1 marginal, 2 snow/ice, 3 cloudy (MODIS pixel_reliability band)
+Terrain does not depend on the sampling date, so every point gets values whatever its date looks like.
 
 Other DEM-derived variables worth adding later if useful: a wetness index (needs a full drainage
 network from a mosaicked regional DEM, not a per-point window) and snow-cover duration (already in
@@ -53,7 +37,6 @@ import os
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import numpy as np
@@ -63,7 +46,6 @@ import requests
 from rasterio.windows import Window
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-import planetary_computer
 
 # --------------------------------------------------------------------------- settings
 POINTS_CSV = Path("/home/renku/work/GlobalAlpineSoilMicrobiome/data/points.csv")
@@ -71,28 +53,13 @@ OUT_CSV = Path("/home/renku/work/GlobalAlpineSoilMicrobiome/data/other_data.csv"
 if len(sys.argv) >= 3:                     # Snakemake: download_others.py <points.csv> <other_data.csv>
     POINTS_CSV, OUT_CSV = Path(sys.argv[1]), Path(sys.argv[2])
 TMP_DIR = OUT_CSV.parent / "tmp"
-# a point whose date is only a year (or unreadable) gets NA everywhere, as requested. The terrain
-# variables do not depend on the date: True keeps them for such points (NDVI stays NA).
-KEEP_STATIC_WHEN_DATE_UNUSABLE = False
 CACHE_JSONL = TMP_DIR / "other_data_cache.jsonl"
 
-STAC_URL = "https://planetarycomputer.microsoft.com/api/stac/v1/search"
-SAS_URL = "https://planetarycomputer.microsoft.com/api/sas/v1/token"
+STAC_URL = "https://planetarycomputer.microsoft.com/api/stac/v1/search"   # only for DEM_SOURCE = "planetary"
 
 DEM_COLLECTION = "cop-dem-glo-30"
 DEM_ASSET = "data"
 DEM_TPI_RADIUS = 3                              # 7x7 window (~ +-105 m at 30 m pixels)
-
-NDVI_COLLECTION = "modis-13Q1-061"
-NDVI_ASSET = "250m_16_days_NDVI"
-NDVI_QA_ASSET = "250m_16_days_pixel_reliability"
-NDVI_SCALE = 0.0001
-NDVI_FILL = -3000
-NDVI_SEARCH_DAYS = 96                           # +-6 sixteen-day composites
-NDVI_GOOD_RELIABILITY = {0, 1}                  # 0 good, 1 marginal (see docstring)
-# MODIS sinusoidal grid: a plain spherical projection with a closed-form formula, so no CRS/PROJ
-# lookup is needed (unlike a general reprojection) -- see the MODIS Land products user guide.
-MODIS_SPHERE_R = 6371007.181
 
 VSICURL_ENV = dict(
     GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR",
@@ -104,7 +71,6 @@ N_WORKERS = 3                                   # polite: bursts are what gets a
 TRIES = 3
 DEM_SOURCE = "aws"                              # "aws" (public tiles, no search) | "planetary" (STAC search)
 DEM_AWS_BASE = "https://copernicus-dem-30m.s3.amazonaws.com"
-FETCH_NDVI = False                              # NDVI needs Planetary Computer; True to fetch it
 MAX_CONSECUTIVE_FAILURES = 25                   # stop instead of hammering a service that keeps refusing
 DEG_M = 111_320.0                               # metres per degree of latitude (WGS84, near enough)
 
@@ -127,17 +93,14 @@ def make_session() -> requests.Session:
     return s
 
 
-# --------------------------------------------------------------------------- STAC + signing
+# --------------------------------------------------------------------------- STAC + signing (DEM_SOURCE = "planetary")
 class Planetary:
     def __init__(self, session: requests.Session):
         self.s = session
-        self._tokens: dict = {}                 # collection -> (token, expiry)
 
-    def search(self, collection: str, lon: float, lat: float, eps: float, datetime_range=None):
+    def search(self, collection: str, lon: float, lat: float, eps: float):
         bbox = [lon - eps, lat - eps, lon + eps, lat + eps]
         body = {"collections": [collection], "bbox": bbox, "limit": 50}
-        if datetime_range:
-            body["datetime"] = datetime_range
         for attempt in range(1, TRIES + 1):
             try:
                 r = self.s.post(STAC_URL, json=body, timeout=60)
@@ -147,18 +110,10 @@ class Planetary:
                 if attempt == TRIES:
                     raise
                 time.sleep(5 * attempt)
+
     def sign(self, collection: str, href: str) -> str:
+        import planetary_computer              # only needed for this source, so the package is optional
         return planetary_computer.sign(href)
-    #def sign(self, collection: str, href: str) -> str:
-    #    token, expiry = self._tokens.get(collection, (None, None))
-    #    if token is None or datetime.now(timezone.utc) > expiry - timedelta(minutes=2):
-    #        r = self.s.get(f"{SAS_URL}/{collection}", timeout=30)
-    #        r.raise_for_status()
-    #        body = r.json()
-    #        token = body["token"]
-    #        expiry = datetime.fromisoformat(body["msft:expiry"].replace("Z", "+00:00"))
-    #        self._tokens[collection] = (token, expiry)
-    #    return href + ("&" if "?" in href else "?") + token
 
 
 # --------------------------------------------------------------------------- DEM
@@ -227,62 +182,6 @@ def terrain_from_window(rec: dict, lat: float):
                 aspect_northness=north, aspect_eastness=east, tpi_m=tpi, roughness_m=rough)
 
 
-# --------------------------------------------------------------------------- NDVI
-def sinusoidal_xy(lon: float, lat: float):
-    lon_r, lat_r = math.radians(lon), math.radians(lat)
-    return MODIS_SPHERE_R * lon_r * math.cos(lat_r), MODIS_SPHERE_R * lat_r
-
-
-def read_pixel_sinu(url: str, x: float, y: float):
-    with rasterio.Env(**VSICURL_ENV), rasterio.open(f"/vsicurl/{url}") as src:
-        row, col = src.index(x, y)               # affine-only; the sinusoidal CRS itself is unused
-        if not (0 <= row < src.height and 0 <= col < src.width):
-            return None
-        v = src.read(1, window=Window(col, row, 1, 1), masked=True)[0, 0]
-        return None if np.ma.is_masked(v) else int(v)
-
-
-def fetch_ndvi(pc: Planetary, lon: float, lat: float, sample_date):
-    start = (sample_date - timedelta(days=NDVI_SEARCH_DAYS)).strftime("%Y-%m-%dT00:00:00Z")
-    end = (sample_date + timedelta(days=NDVI_SEARCH_DAYS)).strftime("%Y-%m-%dT23:59:59Z")
-    feats = pc.search(NDVI_COLLECTION, lon, lat, eps=0.002, datetime_range=f"{start}/{end}")
-    if not feats:
-        return None
-    x, y = sinusoidal_xy(lon, lat)
-
-    #def item_date(f):
-    #    return datetime.fromisoformat(f["properties"]["datetime"].replace("Z", "+00:00")).date()
-    def item_date(f):
-        props = f["properties"]
-
-        dt = props.get("datetime")
-        if dt is None:
-            dt = props.get("start_datetime") or props.get("end_datetime")
-
-        if dt is None:
-            raise ValueError(f"No usable datetime in STAC item {f.get('id')}")
-
-        return datetime.fromisoformat(dt.replace("Z", "+00:00")).date()
-        
-    feats.sort(key=lambda f: abs((item_date(f) - sample_date).days))
-    best = None
-    for f in feats:
-        href = pc.sign(NDVI_COLLECTION, f["assets"][NDVI_ASSET]["href"])
-        raw = read_pixel_sinu(href, x, y)
-        if raw is None or raw == NDVI_FILL:
-            continue
-        qa_href = pc.sign(NDVI_COLLECTION, f["assets"][NDVI_QA_ASSET]["href"])
-        rel = read_pixel_sinu(qa_href, x, y)
-        rec = {"ndvi": raw * NDVI_SCALE, "ndvi_date": item_date(f).isoformat(),
-               "ndvi_days_offset": (item_date(f) - sample_date).days,
-               "ndvi_reliability": rel}
-        if best is None:
-            best = rec                            # nearest-in-time fallback if nothing is "good"
-        if rel in NDVI_GOOD_RELIABILITY:
-            return rec
-    return best
-
-
 # --------------------------------------------------------------------------- cache
 class Cache:
     def __init__(self, path: Path):
@@ -302,47 +201,18 @@ class Cache:
             fh.write(json.dumps({"kind": kind, "key": key, "value": value}) + "\n")
 
 
-# --------------------------------------------------------------------------- sample dates
-MID_MONTH_DAY = 15      # a date given as yyyy-mm is placed in the middle of the month
-
-
-def parse_sample_dates(col: pd.Series):
-    """sample_date strings -> (dates, precision)
-    yyyy-mm-dd -> that day          precision "day"
-    yyyy-mm    -> yyyy-mm-15        precision "month"
-    yyyy       -> NaT (a year alone is too coarse: every output column stays NA)   precision "year"
-    anything else -> NaT                                                           precision "invalid"
-    """
-    s = col.astype(str).str.strip()
-    full = pd.to_datetime(s, format="%Y-%m-%d", errors="coerce")
-    month = pd.to_datetime(s + f"-{MID_MONTH_DAY:02d}", format="%Y-%m-%d", errors="coerce")
-    precision = pd.Series("invalid", index=s.index, dtype=object)
-    precision[s.str.fullmatch(r"\d{4}")] = "year"
-    precision[month.notna() & full.isna()] = "month"
-    precision[full.notna()] = "day"
-    dates = full.where(full.notna(), month)
-    dates[~precision.isin(["day", "month"])] = pd.NaT
-    return dates, precision
-
-
-
 # --------------------------------------------------------------------------- points
 def read_points(path: Path):
     df = pd.read_csv(path)
-    missing = {"lat", "lon", "sample_date"} - set(df.columns)
+    missing = {"lat", "lon"} - set(df.columns)
     if missing:
-        raise ValueError(f"{path} lacks column(s) {sorted(missing)}; required: lat, lon, sample_date")
+        raise ValueError(f"{path} lacks column(s) {sorted(missing)}; required: lat, lon")
     lat = pd.to_numeric(df["lat"], errors="coerce")
     lon = pd.to_numeric(df["lon"], errors="coerce")
     bad = lat.isna() | lon.isna() | ~lat.between(-90, 90) | ~lon.between(-180, 180)
     if bad.any():
         raise ValueError(f"invalid lat/lon in rows {df.index[bad].tolist()[:10]} (decimal degrees, WGS84)")
-    dates, precision = parse_sample_dates(df["sample_date"])
-    invalid = precision == "invalid"
-    if invalid.any():
-        log.warning("%d sample_date value(s) are not yyyy-mm-dd, yyyy-mm or yyyy (left NA): %s",
-                    int(invalid.sum()), df.loc[invalid, "sample_date"].astype(str).tolist()[:10])
-    return df, lat.to_numpy(float), lon.to_numpy(float), dates, precision
+    return df, lat.to_numpy(float), lon.to_numpy(float)
 
 
 # --------------------------------------------------------------------------- main
@@ -353,23 +223,13 @@ def main() -> int:
     OUT_CSV.parent.mkdir(parents=True, exist_ok=True)
     TMP_DIR.mkdir(parents=True, exist_ok=True)
 
-    df, lat, lon, dates, precision = read_points(POINTS_CSV)
-    usable = dates.notna().to_numpy()
-    need_dem = np.ones(len(df), dtype=bool) if KEEP_STATIC_WHEN_DATE_UNUSABLE else usable
-    log.info("date precision %s: %d point(s) get values, %d (year only / unusable date) stay NA%s",
-             dict(precision.value_counts()), int(usable.sum()), int((~usable).sum()),
-             " (terrain kept)" if KEEP_STATIC_WHEN_DATE_UNUSABLE else "")
-    dem_keys = sorted({coord_key(lon[i], lat[i]) for i in np.flatnonzero(need_dem)})
-    ndvi_keys = sorted({(coord_key(lon[i], lat[i]), dates.iloc[i].date().isoformat())
-                        for i in np.flatnonzero(usable)}) if FETCH_NDVI else []
-    log.info("%d points, %d unique coordinates, %d unique coordinate x date pairs", len(df), len(dem_keys),
-             len(ndvi_keys))
+    df, lat, lon = read_points(POINTS_CSV)
+    dem_keys = sorted({coord_key(lon[i], lat[i]) for i in range(len(df))})
+    log.info("%d points, %d unique coordinates", len(df), len(dem_keys))
 
     cache = Cache(CACHE_JSONL)
     dem_todo = [k for k in dem_keys if ("dem", k) not in cache.data]
-    ndvi_todo = [k for k in ndvi_keys if ("ndvi", "|".join(k)) not in cache.data]
-    log.info("DEM: %d cached, %d to fetch. NDVI: %d cached, %d to fetch",
-             len(dem_keys) - len(dem_todo), len(dem_todo), len(ndvi_keys) - len(ndvi_todo), len(ndvi_todo))
+    log.info("DEM: %d cached, %d to fetch", len(dem_keys) - len(dem_todo), len(dem_todo))
 
     session = make_session()
     pc = Planetary(session)
@@ -387,9 +247,6 @@ def main() -> int:
         for ck in dem_todo:
             lo, la = map(float, ck.split(","))
             futs[pool.submit(fetch_dem_window, pc, lo, la)] = ("dem", ck)
-        for ck, d in ndvi_todo:
-            lo, la = map(float, ck.split(","))
-            futs[pool.submit(fetch_ndvi, pc, lo, la, datetime.fromisoformat(d).date())] = ("ndvi", f"{ck}|{d}")
         consecutive = 0
         for i, fut in enumerate(as_completed(futs), 1):
             kind, key = futs[fut]
@@ -404,8 +261,8 @@ def main() -> int:
                     for f in futs:
                         f.cancel()
                     log.error("%d requests in a row failed: stopping (cached values are kept; rerun later). "
-                              "HTTP 403 from Planetary Computer: set PC_SDK_SUBSCRIPTION_KEY, or use "
-                              "DEM_SOURCE = 'aws' / FETCH_NDVI = False.", consecutive)
+                              "If the DEM source keeps refusing: try DEM_SOURCE = 'aws', or set "
+                              "PC_SDK_SUBSCRIPTION_KEY for 'planetary'.", consecutive)
                     break
             if i % 20 == 0 or i == len(futs):
                 log.info("  %d/%d requests done", i, len(futs))
@@ -413,45 +270,24 @@ def main() -> int:
     # ---- assemble -----------------------------------------------------------
     terrain_cols = ["elevation_m", "slope_deg", "aspect_deg", "aspect_northness", "aspect_eastness",
                     "tpi_m", "roughness_m"]
-    ndvi_cols = ["ndvi", "ndvi_date", "ndvi_days_offset", "ndvi_reliability"]
-    out_rows = []
-    no_dem, no_ndvi = 0, 0
+    out_rows, no_dem = [], 0
     for i in range(len(df)):
-        ck = coord_key(lon[i], lat[i])
-        row = {}
-        if need_dem[i]:
-            rec = cache.data.get(("dem", ck))
-            terr = terrain_from_window(rec, lat[i]) if rec else None
-            if terr is None:
-                no_dem += 1
-                row.update({c: np.nan for c in terrain_cols})
-            else:
-                row.update(terr)
-        else:                                   # year only / unusable date: NA everywhere
-            row.update({c: np.nan for c in terrain_cols})
-        if usable[i] and FETCH_NDVI:
-            d = dates.iloc[i].date().isoformat()
-            nrec = cache.data.get(("ndvi", f"{ck}|{d}"))
-            if nrec is None:
-                no_ndvi += 1
-                row.update({c: np.nan for c in ndvi_cols})
-            else:
-                row.update(nrec)
+        rec = cache.data.get(("dem", coord_key(lon[i], lat[i])))
+        terr = terrain_from_window(rec, lat[i]) if rec else None
+        if terr is None:
+            no_dem += 1
+            out_rows.append({c: np.nan for c in terrain_cols})
         else:
-            row.update({c: np.nan for c in ndvi_cols})
-        out_rows.append(row)
+            out_rows.append(terr)
 
     out = pd.concat([df, pd.DataFrame(out_rows)], axis=1)
-    for c in ["elevation_m", "slope_deg", "aspect_deg", "aspect_northness", "aspect_eastness",
-              "tpi_m", "roughness_m", "ndvi"]:
+    for c in terrain_cols:
         out[c] = out[c].astype(float).round(4)
     out.to_csv(OUT_CSV, index=False, na_rep="NA")
     log.info("wrote %s", OUT_CSV)
 
     if no_dem:
         log.warning("%d point(s) with no usable DEM pixel (tile gap, void, or ocean)", no_dem)
-    if no_ndvi:
-        log.warning("%d point(s) with no MODIS composite within +-%d days", no_ndvi, NDVI_SEARCH_DAYS)
     if failed:
         log.error("%d request(s) failed; rerun to retry them (cached values are reused)", len(failed))
         return 1
