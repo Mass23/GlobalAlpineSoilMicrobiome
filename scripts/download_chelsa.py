@@ -3,7 +3,11 @@
 CHELSA V2.1 climate at dated sampling points.
 
 All paths below are under PROJECT_DIR (/home/renku/work/GlobalAlpineSoilMicrobiome).
-Reads   data/points.csv                               columns lat, lon, sample_date (yyyy-mm-dd); others kept
+Reads   data/points.csv                               columns lat, lon, sample_date; others kept
+        sample_date may be yyyy-mm-dd, yyyy-mm (taken as the 15th) or yyyy: a point with only a YEAR (or an
+        unreadable date) gets NA in every output column
+Run     python3 download_chelsa.py [points.csv chelsa_data.csv]   (Snakemake passes the two paths; the
+        provenance file and the tmp/ cache are written next to the output)
 Writes  data/climate/chelsa_climate.csv               points + bio01..bio19 fcf fgd scd clt ... vpd
         data/climate/chelsa_climate_provenance.csv    per point x variable: source, anchors, files
         data/tmp/chelsa_plan.csv                      unique CHELSA files the run reads
@@ -57,16 +61,13 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 # --------------------------------------------------------------------------- settings
-import sys
-
-POINTS_CSV = Path(sys.argv[1])
-OUT_CSV = Path(sys.argv[2])
-
-PROJECT_DIR = Path("/home/renku/work/epfl-altshuler/GlobalAlpineSoilMicrobiome")
-#POINTS_CSV = PROJECT_DIR / "data/points.csv"
-#OUT_CSV = PROJECT_DIR / "data/chelsa_data.csv"
-PROV_CSV = PROJECT_DIR / "data/chelsa_data_provenance.csv"
-TMP_DIR = PROJECT_DIR / "data/tmp"
+PROJECT_DIR = Path("/home/renku/work/GlobalAlpineSoilMicrobiome")
+POINTS_CSV = PROJECT_DIR / "data/points.csv"
+OUT_CSV = PROJECT_DIR / "data/chelsa_data.csv"
+if len(sys.argv) >= 3:                     # Snakemake: download_chelsa.py <points.csv> <chelsa_data.csv>
+    POINTS_CSV, OUT_CSV = Path(sys.argv[1]), Path(sys.argv[2])
+PROV_CSV = OUT_CSV.with_name("chelsa_data_provenance.csv")      # next to the output
+TMP_DIR = OUT_CSV.parent / "tmp"
 PLAN_CSV = TMP_DIR / "chelsa_plan.csv"
 CACHE_JSONL = TMP_DIR / "chelsa_cache.jsonl"
 
@@ -545,22 +546,47 @@ def sample(url: str, cks: list[str]):
     return dict(zip(cks, vals)), {"scale": scale, "offset": offset}
 
 
+# --------------------------------------------------------------------------- sample dates
+MID_MONTH_DAY = 15      # a date given as yyyy-mm is placed in the middle of the month
+
+
+def parse_sample_dates(col: pd.Series):
+    """sample_date strings -> (dates, precision)
+    yyyy-mm-dd -> that day          precision "day"
+    yyyy-mm    -> yyyy-mm-15        precision "month"
+    yyyy       -> NaT (a year alone is too coarse: every output column stays NA)   precision "year"
+    anything else -> NaT                                                           precision "invalid"
+    """
+    s = col.astype(str).str.strip()
+    full = pd.to_datetime(s, format="%Y-%m-%d", errors="coerce")
+    month = pd.to_datetime(s + f"-{MID_MONTH_DAY:02d}", format="%Y-%m-%d", errors="coerce")
+    precision = pd.Series("invalid", index=s.index, dtype=object)
+    precision[s.str.fullmatch(r"\d{4}")] = "year"
+    precision[month.notna() & full.isna()] = "month"
+    precision[full.notna()] = "day"
+    dates = full.where(full.notna(), month)
+    dates[~precision.isin(["day", "month"])] = pd.NaT
+    return dates, precision
+
+
+
 # --------------------------------------------------------------------------- points
 def read_points(path: Path):
     df = pd.read_csv(path)
     missing = {"lat", "lon", "sample_date"} - set(df.columns)
     if missing:
         raise ValueError(f"{path} lacks column(s) {sorted(missing)}; required: lat, lon, sample_date")
-    dates = pd.to_datetime(df["sample_date"].astype(str).str.strip(), format=DATE_FORMAT, errors="coerce")
-    if dates.isna().any():
-        bad = df.loc[dates.isna(), "sample_date"].astype(str).tolist()
-        raise ValueError(f"{len(bad)} date(s) not in yyyy-mm-dd: {bad[:10]}")
+    dates, precision = parse_sample_dates(df["sample_date"])
+    invalid = precision == "invalid"
+    if invalid.any():
+        log.warning("%d sample_date value(s) are not yyyy-mm-dd, yyyy-mm or yyyy (left NA): %s",
+                    int(invalid.sum()), df.loc[invalid, "sample_date"].astype(str).tolist()[:10])
     lat = pd.to_numeric(df["lat"], errors="coerce")
     lon = pd.to_numeric(df["lon"], errors="coerce")
     bad = lat.isna() | lon.isna() | ~lat.between(-90, 90) | ~lon.between(-180, 180)
     if bad.any():
         raise ValueError(f"invalid lat/lon in rows {df.index[bad].tolist()[:10]} (decimal degrees, WGS84)")
-    return df, lat.to_numpy(float), lon.to_numpy(float), dates
+    return df, lat.to_numpy(float), lon.to_numpy(float), dates, precision
 
 
 # --------------------------------------------------------------------------- main
@@ -574,15 +600,23 @@ def main() -> int:
     PROV_CSV.parent.mkdir(parents=True, exist_ok=True)
     TMP_DIR.mkdir(parents=True, exist_ok=True)
 
-    df, lat, lon, dates = read_points(POINTS_CSV)
+    df, lat, lon, dates, precision = read_points(POINTS_CSV)
+    usable = dates.notna().to_numpy()
+    d_ok = dates.dropna()
     log.info("%d points read from %s (%s to %s)", len(df), POINTS_CSV,
-             dates.min().strftime("%Y-%m-%d"), dates.max().strftime("%Y-%m-%d"))
+             d_ok.min().strftime("%Y-%m-%d") if len(d_ok) else "-",
+             d_ok.max().strftime("%Y-%m-%d") if len(d_ok) else "-")
+    log.info("date precision %s: %d point(s) get values, %d (year only / unusable date) stay NA",
+             dict(precision.value_counts()), int(usable.sum()), int((~usable).sum()))
 
     # ---- 1+2: list the bucket and resolve every point x variable -------------
     bucket = Bucket(CHELSA_BUCKET)
     resolver = Resolver(Catalog(bucket))
     plans, need, need_vars = [], {}, {}
     for i in range(len(df)):
+        if not usable[i]:                       # year only / unusable date: nothing to plan
+            plans.append(None)
+            continue
         y, m = dates.iloc[i].year, dates.iloc[i].month
         ck = coord_key(lon[i], lat[i])
         p = {v: resolver.annual(v, y) for v in BIO_VARS}
@@ -593,7 +627,7 @@ def main() -> int:
                 need_vars.setdefault(k, set()).add(var)
         plans.append(p)
 
-    log.info("values to fill: %s", dict(Counter(src.kind.split("_")[0] for p in plans for src in p.values())))
+    log.info("values to fill: %s", dict(Counter(src.kind.split("_")[0] for p in plans if p is not None for src in p.values())))
     log.info("plan: %d unique GeoTIFFs", len(need))
     pd.DataFrame(
         [{"key": k, "url": bucket.url(k), "size_mb": round(bucket.sizes.get(k, 0) / 1e6, 1),
@@ -622,6 +656,16 @@ def main() -> int:
     cols = {v: np.full(len(df), np.nan) for v in ALL_VARS}
     prov = []
     for i, p in enumerate(plans):
+        if p is None:                           # every column stays NA; one provenance row says why
+            prov.append({
+                "row": i,
+                "site": df["site"].iloc[i] if "site" in df.columns else None,
+                "sample_date": df["sample_date"].iloc[i],
+                "lat": lat[i], "lon": lon[i],
+                "variable": "ALL", "source": "none", "value": None,
+                "note": f"date precision '{precision.iloc[i]}': no value (needs yyyy-mm or yyyy-mm-dd)",
+            })
+            continue
         ck = coord_key(lon[i], lat[i])
         for var, src in p.items():
             cols[var][i], n_ok, anchors, kelvin = evaluate(src, var, ck, cache)
@@ -649,7 +693,7 @@ def main() -> int:
             })
     for v in ALL_VARS:
         out[v] = np.round(cols[v], 4)
-    out.to_csv(OUT_CSV, index=False)
+    out.to_csv(OUT_CSV, index=False, na_rep="NA")
     pd.DataFrame(prov).to_csv(PROV_CSV, index=False)
     log.info("wrote %s and %s", OUT_CSV, PROV_CSV)
 

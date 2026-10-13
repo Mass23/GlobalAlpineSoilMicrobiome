@@ -4,7 +4,13 @@ Terrain (Copernicus DEM GLO-30) and vegetation index (MODIS NDVI) at sampling po
 
 All paths below are relative to the Snakefile's folder (matches chelsa_climate.py /
 soilgrids_soil.py, called "other_data" in the Snakefile).
-Reads   data/points.csv                              columns lat, lon, sample_date (yyyy-mm-dd)
+Reads   data/points.csv                              columns lat, lon, sample_date
+        sample_date may be yyyy-mm-dd, yyyy-mm (taken as the 15th: the NDVI composite is searched around
+        it) or yyyy: a point with only a YEAR (or an unreadable date) gets NA in EVERY output column,
+        the terrain ones too (set KEEP_STATIC_WHEN_DATE_UNUSABLE = True to keep the date-independent
+        terrain values for those points)
+Run     python3 download_others.py [points.csv other_data.csv]   (Snakemake passes the two paths; the
+        tmp/ cache is written next to the output)
 Writes  ../epfl-altshuler/GlobalAlpineSoilMicrobiome/data/other_data.csv
         data/tmp/other_data_cache.jsonl               fetched pixels; lets an interrupted run resume
 
@@ -56,14 +62,14 @@ from urllib3.util.retry import Retry
 import planetary_computer
 
 # --------------------------------------------------------------------------- settings
-import sys
-
-POINTS_CSV = Path(sys.argv[1])
-OUT_CSV = Path(sys.argv[2])
-#POINTS_CSV = Path("/home/renku/work/GlobalAlpineSoilMicrobiome/data/points.csv")
-#OUT_CSV = Path("/home/renku/work/GlobalAlpineSoilMicrobiome/data/other_data.csv")
-TMP_DIR = Path("/home/renku/work/epfl-altshuler/GlobalAlpineSoilMicrobiome/tmp")
-
+POINTS_CSV = Path("/home/renku/work/GlobalAlpineSoilMicrobiome/data/points.csv")
+OUT_CSV = Path("/home/renku/work/GlobalAlpineSoilMicrobiome/data/other_data.csv")
+if len(sys.argv) >= 3:                     # Snakemake: download_others.py <points.csv> <other_data.csv>
+    POINTS_CSV, OUT_CSV = Path(sys.argv[1]), Path(sys.argv[2])
+TMP_DIR = OUT_CSV.parent / "tmp"
+# a point whose date is only a year (or unreadable) gets NA everywhere, as requested. The terrain
+# variables do not depend on the date: True keeps them for such points (NDVI stays NA).
+KEEP_STATIC_WHEN_DATE_UNUSABLE = False
 CACHE_JSONL = TMP_DIR / "other_data_cache.jsonl"
 
 STAC_URL = "https://planetarycomputer.microsoft.com/api/stac/v1/search"
@@ -270,6 +276,30 @@ class Cache:
             fh.write(json.dumps({"kind": kind, "key": key, "value": value}) + "\n")
 
 
+# --------------------------------------------------------------------------- sample dates
+MID_MONTH_DAY = 15      # a date given as yyyy-mm is placed in the middle of the month
+
+
+def parse_sample_dates(col: pd.Series):
+    """sample_date strings -> (dates, precision)
+    yyyy-mm-dd -> that day          precision "day"
+    yyyy-mm    -> yyyy-mm-15        precision "month"
+    yyyy       -> NaT (a year alone is too coarse: every output column stays NA)   precision "year"
+    anything else -> NaT                                                           precision "invalid"
+    """
+    s = col.astype(str).str.strip()
+    full = pd.to_datetime(s, format="%Y-%m-%d", errors="coerce")
+    month = pd.to_datetime(s + f"-{MID_MONTH_DAY:02d}", format="%Y-%m-%d", errors="coerce")
+    precision = pd.Series("invalid", index=s.index, dtype=object)
+    precision[s.str.fullmatch(r"\d{4}")] = "year"
+    precision[month.notna() & full.isna()] = "month"
+    precision[full.notna()] = "day"
+    dates = full.where(full.notna(), month)
+    dates[~precision.isin(["day", "month"])] = pd.NaT
+    return dates, precision
+
+
+
 # --------------------------------------------------------------------------- points
 def read_points(path: Path):
     df = pd.read_csv(path)
@@ -281,11 +311,12 @@ def read_points(path: Path):
     bad = lat.isna() | lon.isna() | ~lat.between(-90, 90) | ~lon.between(-180, 180)
     if bad.any():
         raise ValueError(f"invalid lat/lon in rows {df.index[bad].tolist()[:10]} (decimal degrees, WGS84)")
-    dates = pd.to_datetime(df["sample_date"].astype(str).str.strip(), format="%Y-%m-%d", errors="coerce")
-    if dates.isna().any():
-        bad_d = df.loc[dates.isna(), "sample_date"].astype(str).tolist()
-        raise ValueError(f"{len(bad_d)} date(s) not in yyyy-mm-dd: {bad_d[:10]}")
-    return df, lat.to_numpy(float), lon.to_numpy(float), dates
+    dates, precision = parse_sample_dates(df["sample_date"])
+    invalid = precision == "invalid"
+    if invalid.any():
+        log.warning("%d sample_date value(s) are not yyyy-mm-dd, yyyy-mm or yyyy (left NA): %s",
+                    int(invalid.sum()), df.loc[invalid, "sample_date"].astype(str).tolist()[:10])
+    return df, lat.to_numpy(float), lon.to_numpy(float), dates, precision
 
 
 # --------------------------------------------------------------------------- main
@@ -296,9 +327,15 @@ def main() -> int:
     OUT_CSV.parent.mkdir(parents=True, exist_ok=True)
     TMP_DIR.mkdir(parents=True, exist_ok=True)
 
-    df, lat, lon, dates = read_points(POINTS_CSV)
-    dem_keys = sorted({coord_key(lon[i], lat[i]) for i in range(len(df))})
-    ndvi_keys = sorted({(coord_key(lon[i], lat[i]), dates.iloc[i].date().isoformat()) for i in range(len(df))})
+    df, lat, lon, dates, precision = read_points(POINTS_CSV)
+    usable = dates.notna().to_numpy()
+    need_dem = np.ones(len(df), dtype=bool) if KEEP_STATIC_WHEN_DATE_UNUSABLE else usable
+    log.info("date precision %s: %d point(s) get values, %d (year only / unusable date) stay NA%s",
+             dict(precision.value_counts()), int(usable.sum()), int((~usable).sum()),
+             " (terrain kept)" if KEEP_STATIC_WHEN_DATE_UNUSABLE else "")
+    dem_keys = sorted({coord_key(lon[i], lat[i]) for i in np.flatnonzero(need_dem)})
+    ndvi_keys = sorted({(coord_key(lon[i], lat[i]), dates.iloc[i].date().isoformat())
+                        for i in np.flatnonzero(usable)})
     log.info("%d points, %d unique coordinates, %d unique coordinate x date pairs", len(df), len(dem_keys),
              len(ndvi_keys))
 
@@ -337,28 +374,34 @@ def main() -> int:
     no_dem, no_ndvi = 0, 0
     for i in range(len(df)):
         ck = coord_key(lon[i], lat[i])
-        d = dates.iloc[i].date().isoformat()
         row = {}
-        rec = cache.data.get(("dem", ck))
-        terr = terrain_from_window(rec, lat[i]) if rec else None
-        if terr is None:
-            no_dem += 1
+        if need_dem[i]:
+            rec = cache.data.get(("dem", ck))
+            terr = terrain_from_window(rec, lat[i]) if rec else None
+            if terr is None:
+                no_dem += 1
+                row.update({c: np.nan for c in terrain_cols})
+            else:
+                row.update(terr)
+        else:                                   # year only / unusable date: NA everywhere
             row.update({c: np.nan for c in terrain_cols})
+        if usable[i]:
+            d = dates.iloc[i].date().isoformat()
+            nrec = cache.data.get(("ndvi", f"{ck}|{d}"))
+            if nrec is None:
+                no_ndvi += 1
+                row.update({c: np.nan for c in ndvi_cols})
+            else:
+                row.update(nrec)
         else:
-            row.update(terr)
-        nrec = cache.data.get(("ndvi", f"{ck}|{d}"))
-        if nrec is None:
-            no_ndvi += 1
             row.update({c: np.nan for c in ndvi_cols})
-        else:
-            row.update(nrec)
         out_rows.append(row)
 
     out = pd.concat([df, pd.DataFrame(out_rows)], axis=1)
     for c in ["elevation_m", "slope_deg", "aspect_deg", "aspect_northness", "aspect_eastness",
               "tpi_m", "roughness_m", "ndvi"]:
         out[c] = out[c].astype(float).round(4)
-    out.to_csv(OUT_CSV, index=False)
+    out.to_csv(OUT_CSV, index=False, na_rep="NA")
     log.info("wrote %s", OUT_CSV)
 
     if no_dem:

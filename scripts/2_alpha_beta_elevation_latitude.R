@@ -84,7 +84,7 @@ CFG <- list(
   env_file    = env_table,      # all_sampled_data.csv: elevation (DEM) etc., written by download_earth_data
   alpha_id    = "Sample_acc",   # sample ID column in sample_data_filtered.tsv   (check!)
   env_id      = "site",         # matching ID column in env_file                  (check!)
-  env_elev    = "elevation",    # elevation column (metres) in env_file           (check!)
+  env_elev    = "elevation_m",  # elevation column (metres) in env_file: written by download_others.py
   biom_file   = filtered_biom,  # written by the Snakemake rule filter_biom
   biom_id     = "Accessions",   # column of alpha_file that matches the BIOM sample IDs
   # --- part A ---
