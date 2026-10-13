@@ -95,22 +95,44 @@ rule filter_biom:
         biom subset-table -i {input.biom} -a sample -s {input.samples} -o {output}
         """
 
+# points.csv: one row per sample x location x depth x date, plus the column lowland_subset:
+#   "yes" = every alpine sample + randomly drawn lowland samples (5 x the number of alpine ones), "no" = the others.
+# The draw is per SAMPLE (site), reproducible and independent of row order. Optional keys in smk_config.yaml:
+#   lowland_subset_seed:  23     seed of the random draw (default 23)
+#   lowland_subset_ratio: 5.0    lowland samples drawn per alpine sample (default 5; 1.0 = the same number)
+# download_soilgrids.py only fetches the "yes" rows (soil is the slow download); the others stay NA there.
 rule prepare_points:
     input:
         SAMPLE_DATA_FILTERED
     output:
         DATA_POINTS
+    params:
+        seed=config.get("lowland_subset_seed", 23),
+        ratio=config.get("lowland_subset_ratio", 5.0)
     run:
+        import numpy as np
         import pandas as pd
 
         # tab-separated, no quoting: text fields can contain commas and double quotes
         df = pd.read_csv(input[0], sep="\t", quoting=csv.QUOTE_NONE, low_memory=False)
 
-        points = df[["Sample_acc", "Latitude", "Longitude", "Depth_m", "Date_collected"]].copy()
-        points.columns = ["site", "lat", "lon", "depth_m", "sample_date"]
+        points = df[["Sample_acc", "Latitude", "Longitude", "Depth_m", "Date_collected", "Alpine"]].copy()
+        points.columns = ["site", "lat", "lon", "depth_m", "sample_date", "group"]
+
+        # lowland_subset: all alpine samples + randomly drawn lowland samples (same number x ratio)
+        is_alpine = points.groupby("site")["group"].apply(lambda g: bool((g == "Alpine").any()))
+        alpine_sites = is_alpine.index[is_alpine.to_numpy()].to_numpy()
+        lowland_sites = np.sort(is_alpine.index[~is_alpine.to_numpy()].to_numpy())
+        n = min(len(lowland_sites), int(round(float(params.ratio) * len(alpine_sites))))
+        chosen = np.random.default_rng(int(params.seed)).choice(lowland_sites, size=n, replace=False)
+        keep = set(alpine_sites) | set(chosen)
+        points["lowland_subset"] = np.where(points["site"].isin(keep), "yes", "no")
+        print(f"lowland_subset: {len(alpine_sites)} alpine + {n} of {len(lowland_sites)} lowland samples = "
+              f"{len(alpine_sites) + n} samples marked yes")
+
         points["depth_cm"] = points["depth_m"] * 100
-        points = points.drop(columns=["depth_m"])      # was "depth_M": the column is lower case
-        points = points.drop_duplicates()              # several read sets can share one sample
+        points = points.drop(columns=["depth_m", "group"])    # depth_m was "depth_M" in an earlier version: lower case
+        points = points.drop_duplicates()                     # several read sets can share one sample
 
         points.to_csv(output[0], index=False)
 

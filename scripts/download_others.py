@@ -1,191 +1,190 @@
 #!/usr/bin/env python3
 """
-Terrain (Copernicus DEM GLO-30) at sampling points.
+SoilGrids 2.0 soil properties at sampling points.
 
-Run     python3 download_others.py [points.csv other_data.csv]   (Snakemake passes the two paths; the
-        tmp/ cache is written next to the output)
-Reads   points.csv      columns lat, lon; all other columns are kept in the output (the date is not used)
-Writes  other_data.csv  points + the terrain columns below
-        tmp/other_data_cache.jsonl   fetched pixels; lets an interrupted run resume
+Run     python3 download_soilgrids.py [points.csv soilgrids_data.csv [properties]]
+        Snakemake passes the two paths; the tmp/ cache is written next to the output. `properties` is an
+        optional comma-separated list (e.g. phh2o,soc,nitrogen,clay,sand,silt,cec,bdod); empty = all.
+        SOILGRIDS_WORKERS (environment variable) sets the number of parallel requests (default 4).
 
-Copernicus DEM GLO-30 (2019-2021 TanDEM-X-derived, WGS84 lon/lat tiles, no login). DEM_SOURCE = "aws"
-(default) reads its public COG tiles from the AWS Open Data bucket by tile name: no search, no token, no
-account. DEM_SOURCE = "planetary" reads the same product through Microsoft Planetary Computer's STAC
-catalogue (which may answer 403 to anonymous bursts: then set PC_SDK_SUBSCRIPTION_KEY, see make_session).
+Subset: when points.csv has a `lowland_subset` column, only the rows marked "yes" (all alpine samples plus a
+random lowland subset of the same size, drawn in the Snakefile rule prepare_points) are fetched; the other rows
+stay NA. Without that column every row is fetched (ONLY_SUBSET = False also fetches everything).
 
-Terrain variables (from a small window of the DEM centred on each point):
-  elevation_m          centre-pixel elevation
-  slope_deg            Horn's (1981) method on the 3x3 neighbourhood
-  aspect_deg           compass bearing of steepest descent (0=N, 90=E); empty on ~flat ground
-  aspect_northness      cos(aspect) -- for regressions instead of the circular aspect_deg
-  aspect_eastness       sin(aspect)
-  tpi_m                 Topographic Position Index: elevation - mean of a ~200 m ring around it
-  roughness_m           terrain ruggedness index: RMS elevation difference to the 3x3 neighbours
-A point within ~1 pixel of a DEM tile edge gets a smaller, boundless-padded window; too few valid
-pixels around a point (open water, a DEM void) leaves these columns empty and is noted in the log.
-Terrain does not depend on the sampling date, so every point gets values whatever its date looks like.
+Speed: one WCS request per coordinate x property x layer is the whole cost (about 2.6 requests/s with 4
+workers). Only the layers the output needs are requested: the top three (0-5, 5-15, 15-30 cm) for every
+coordinate, plus a deeper layer only where a sample's depth_cm falls in it. Choosing fewer properties is
+the other big lever (each property = 3 requests per coordinate); the log shows the speed and an ETA.
+Reads   points.csv                   columns lat, lon, depth_cm (may be empty); others kept
+Writes  soilgrids_data.csv           points + two sets of columns per property:
+          <prop>_30cm_avg   thickness-weighted mean of 0-5, 5-15, 15-30 cm (5:10:15)
+          <prop>_depth_val  value of the SoilGrids layer containing depth_cm
+                            (layer top <= depth < layer bottom, 200 cm included);
+                            empty when depth_cm is empty or outside 0-200 cm
+        tmp/soilgrids_cache.jsonl       fetched pixels; lets an interrupted run resume
 
-Other DEM-derived variables worth adding later if useful: a wetness index (needs a full drainage
-network from a mosaicked regional DEM, not a per-point window) and snow-cover duration (already in
-the CHELSA extraction as `scd`).
+Failures are of two kinds, handled differently:
+  * the server ANSWERED with an OGC service exception (e.g. a point outside the map: SoilGrids has no soil
+    on the ice sheets): asking again gives the same answer, so it is NOT retried; the value is NA, the
+    exception text is kept in the cache, and it does not make the run fail unless more than
+    MAX_REFUSED_FRACTION of the coordinates are refused (that would point at a bug, not at the map edge);
+  * network / server trouble (timeouts, 5xx, a non-XML page): retried TRIES times with a pause, then
+    reported as FAILED (exit code 1; a rerun retries only those).
+
+Properties (mean prediction, converted to conventional units as in ISRIC's table):
+  bdod kg/dm3, cec cmol(c)/kg, cfvo vol%, clay %, sand %, silt %, nitrogen g/kg, phh2o pH,
+  soc g/kg, ocd kg/m3, wv0010 / wv0033 / wv1500 vol% (water content at 10 / 33 / 1500 kPa)
+  ocs kg/m2: organic carbon STOCK, only published for 0-30 cm -> ocs_30cm_avg only
+SoilGrids layers: 0-5, 5-15, 15-30, 30-60, 60-100, 100-200 cm, 250 m resolution.
+
+Data access goes through the `soilgrids` package's WCS services (maps.isric.org). For each
+unique coordinate a 3x3-pixel tile (~250 m pixels) centred on the point is requested in
+EPSG:4326 and the centre pixel is read. The WCS connection is opened once per property;
+the package's get_coverage_data() would re-download the service description on every call
+and open results with rioxarray/pyproj, which needs PROJ's database.
 """
 # no `from __future__` import: keeps the file usable with Snakemake's `script:` preamble too
 import json
 import logging
-import math
 import os
+import re
 import sys
 import time
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import rasterio
-import requests
-from rasterio.windows import Window
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
+from rasterio.io import MemoryFile
+from soilgrids import SoilGrids
 
 # --------------------------------------------------------------------------- settings
-POINTS_CSV = Path("/home/renku/work/GlobalAlpineSoilMicrobiome/data/points.csv")
-OUT_CSV = Path("/home/renku/work/GlobalAlpineSoilMicrobiome/data/other_data.csv")
-if len(sys.argv) >= 3:                     # Snakemake: download_others.py <points.csv> <other_data.csv>
-    POINTS_CSV, OUT_CSV = Path(sys.argv[1]), Path(sys.argv[2])
+# Snakemake: download_soilgrids.py <points.csv> <soilgrids_data.csv>; the defaults are for running by hand
+PROJECT_DIR = Path("/home/renku/work/epfl-altshuler/GlobalAlpineSoilMicrobiome")
+POINTS_CSV = Path(sys.argv[1]) if len(sys.argv) >= 3 else PROJECT_DIR / "data/points.csv"
+OUT_CSV = Path(sys.argv[2]) if len(sys.argv) >= 3 else PROJECT_DIR / "data/soilgrids_data.csv"
 TMP_DIR = OUT_CSV.parent / "tmp"
-CACHE_JSONL = TMP_DIR / "other_data_cache.jsonl"
+CACHE_JSONL = TMP_DIR / "soilgrids_cache.jsonl"
 
-STAC_URL = "https://planetarycomputer.microsoft.com/api/stac/v1/search"   # only for DEM_SOURCE = "planetary"
+# property -> factor dividing the stored integers (ISRIC conversion table)
+PROPERTIES = {
+    "bdod": 100, "cec": 10, "cfvo": 10, "clay": 10, "sand": 10, "silt": 10,
+    "nitrogen": 100, "phh2o": 10, "soc": 10, "ocd": 10,
+    "wv0010": 10, "wv0033": 10, "wv1500": 10,
+}
+if len(sys.argv) >= 4 and sys.argv[3].strip():        # optional 3rd argument: which properties to fetch
+    _wanted = [p.strip() for p in sys.argv[3].split(",") if p.strip()]
+    _unknown = [p for p in _wanted if p not in PROPERTIES]
+    if _unknown:
+        raise SystemExit(f"unknown SoilGrids property/properties {_unknown}; known: {sorted(PROPERTIES)}")
+    PROPERTIES = {p: PROPERTIES[p] for p in _wanted}
+OCS_FACTOR = 10                                     # ocs: t/ha -> kg/m2, 0-30 cm only
+LAYERS = [(0, 5), (5, 15), (15, 30), (30, 60), (60, 100), (100, 200)]
+TOP30 = LAYERS[:3]
+STAT = "mean"
 
-DEM_COLLECTION = "cop-dem-glo-30"
-DEM_ASSET = "data"
-DEM_TPI_RADIUS = 3                              # 7x7 window (~ +-105 m at 30 m pixels)
+HALF_WIDTH_DEG = 0.003375                           # 3 x 3 tile of ~0.00225 deg (~250 m) pixels
+N_WORKERS = int(os.environ.get("SOILGRIDS_WORKERS", 4))   # parallel requests; keep modest for ISRIC
+TRIES = 3                                           # for network / server trouble only (see docstring)
+SUBSET_COLUMN = "lowland_subset"                    # points.csv column: "yes" = alpine + random lowland subset
+ONLY_SUBSET = True                                  # False: fetch every row even if that column exists
+MAX_REFUSED_FRACTION = 0.05                         # more refused coordinates than this = suspect, exit 1
+RETRY_REFUSED = False                               # True: ask again for coordinates refused in an earlier run
 
-VSICURL_ENV = dict(
-    GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR",
-    GDAL_HTTP_MAX_RETRY="5",
-    GDAL_HTTP_RETRY_DELAY="3",
-    GDAL_HTTP_TIMEOUT="120",
-)
-N_WORKERS = 3                                   # polite: bursts are what gets anonymous clients refused
-TRIES = 3
-DEM_SOURCE = "aws"                              # "aws" (public tiles, no search) | "planetary" (STAC search)
-DEM_AWS_BASE = "https://copernicus-dem-30m.s3.amazonaws.com"
-MAX_CONSECUTIVE_FAILURES = 25                   # stop instead of hammering a service that keeps refusing
-DEG_M = 111_320.0                               # metres per degree of latitude (WGS84, near enough)
+# the package's catalogue lacks the water-retention layers; same WCS pattern at ISRIC
+for wv, kpa in [("wv0010", 10), ("wv0033", 33), ("wv1500", 1500)]:
+    SoilGrids.MAP_SERVICES.setdefault(wv, {
+        "name": f"Volumetric water content at {kpa} kPa",
+        "link": f"https://maps.isric.org/mapserv?map=/map/{wv}.map",
+        "units": "10^-3 cm3/cm3",
+    })
 
-log = logging.getLogger("other_data")
+log = logging.getLogger("soilgrids")
+
+
+class ServiceRefused(Exception):
+    """the WCS answered with an OGC service exception: the same request will get the same answer"""
+
+
+def service_exception(body: bytes):
+    """text of an OGC ServiceException / ExceptionReport, or None if the body is not one"""
+    text = body[:20000].decode("utf-8", "replace")
+    if "ExceptionReport" not in text:
+        return None
+    parts = re.findall(r"<(?:ows:)?(?:ServiceException|ExceptionText)\b([^>]*)>(.*?)</(?:ows:)?(?:ServiceException|ExceptionText)>",
+                       text, flags=re.S)
+    msg = " | ".join(" ".join((f"[{re.sub(chr(34), '', a).strip()}]" if a.strip() else "", m.strip())).strip()
+                     for a, m in parts)
+    return re.sub(r"\s+", " ", msg or text)[:500]
+
+
+def coverage_id(prop: str, top: int, bottom: int) -> str:
+    return f"{prop}_{top}-{bottom}cm_{STAT}"
 
 
 def coord_key(lon: float, lat: float) -> str:
     return f"{lon:.6f},{lat:.6f}"
 
 
-def make_session() -> requests.Session:
-    s = requests.Session()
-    s.headers["User-Agent"] = "GlobalAlpineSoilMicrobiome-download_others/1.0 (research use)"
-    key = os.environ.get("PC_SDK_SUBSCRIPTION_KEY")      # optional: less restricted rate limiting on Planetary Computer
-    if key:
-        s.headers["Ocp-Apim-Subscription-Key"] = key
-    retry = Retry(total=6, backoff_factor=2, status_forcelist=(429, 500, 502, 503, 504))
-    s.mount("https://", HTTPAdapter(max_retries=retry))
-    s.mount("http://", HTTPAdapter(max_retries=retry))
-    return s
+# --------------------------------------------------------------------------- WCS access
+class Services:
+    """One WCS connection per property, opened lazily through the soilgrids package."""
+
+    def __init__(self):
+        self._wcs, self._crs = {}, {}
+
+    def get(self, prop):
+        if prop not in self._wcs:
+            wcs, coverages = SoilGrids._get_service_and_coverage_list(prop)
+            crs = None
+            for cov in coverages:                   # EPSG:4326 code as the service spells it
+                codes = [c.getcodeurn() for c in wcs.contents[cov].supportedCRS]
+                crs = next((c for c in codes if c.endswith(":4326")), None)
+                break
+            if crs is None:
+                raise RuntimeError(f"{prop}: WCS offers no EPSG:4326 output")
+            self._wcs[prop], self._crs[prop] = (wcs, set(coverages)), crs
+        return self._wcs[prop], self._crs[prop]
 
 
-# --------------------------------------------------------------------------- STAC + signing (DEM_SOURCE = "planetary")
-class Planetary:
-    def __init__(self, session: requests.Session):
-        self.s = session
-
-    def search(self, collection: str, lon: float, lat: float, eps: float):
-        bbox = [lon - eps, lat - eps, lon + eps, lat + eps]
-        body = {"collections": [collection], "bbox": bbox, "limit": 50}
-        for attempt in range(1, TRIES + 1):
-            try:
-                r = self.s.post(STAC_URL, json=body, timeout=60)
-                r.raise_for_status()
-                return r.json().get("features", [])
-            except requests.RequestException:
-                if attempt == TRIES:
-                    raise
-                time.sleep(5 * attempt)
-
-    def sign(self, collection: str, href: str) -> str:
-        import planetary_computer              # only needed for this source, so the package is optional
-        return planetary_computer.sign(href)
+def read_centre(tif_bytes: bytes):
+    """centre pixel of a small GeoTIFF tile; None for nodata"""
+    with MemoryFile(tif_bytes) as mem, mem.open() as src:
+        arr = src.read(1, masked=True)
+        v = arr[arr.shape[0] // 2, arr.shape[1] // 2]
+        if np.ma.is_masked(v) or int(v) == -32768:
+            return None
+        return int(v)
 
 
-# --------------------------------------------------------------------------- DEM
-def read_window(url: str, lon: float, lat: float, half: int):
-    """(half*2+1)-square window centred on (lon, lat), boundless (nodata outside the file)"""
-    with rasterio.Env(**VSICURL_ENV), rasterio.open(f"/vsicurl/{url}") as src:
-        row, col = src.index(lon, lat)
-        win = Window(col - half, row - half, half * 2 + 1, half * 2 + 1)
-        arr = src.read(1, window=win, boundless=True, fill_value=src.nodata, masked=True)
-        px_x, px_y = abs(src.transform.a), abs(src.transform.e)
-    return arr, px_x, px_y
-
-
-def dem_tile_url(lon: float, lat: float) -> str:
-    """public Copernicus GLO-30 COG tile (1 x 1 degree, named by its south-west corner)"""
-    lat0, lon0 = math.floor(lat), math.floor(lon)
-    name = (f"Copernicus_DSM_COG_10_{'N' if lat0 >= 0 else 'S'}{abs(lat0):02d}_00_"
-            f"{'E' if lon0 >= 0 else 'W'}{abs(lon0):03d}_00_DEM")
-    return f"{DEM_AWS_BASE}/{name}/{name}.tif"
-
-
-def fetch_dem_window(pc: Planetary, lon: float, lat: float):
-    if DEM_SOURCE == "aws":
+def fetch(services: Services, prop: str, cov: str, lon: float, lat: float):
+    (wcs, _), crs = services.get(prop)
+    bbox = (lon - HALF_WIDTH_DEG, lat - HALF_WIDTH_DEG, lon + HALF_WIDTH_DEG, lat + HALF_WIDTH_DEG)
+    for attempt in range(1, TRIES + 1):
         try:
-            arr, px_x_deg, px_y_deg = read_window(dem_tile_url(lon, lat), lon, lat, DEM_TPI_RADIUS)
-        except rasterio.errors.RasterioIOError:      # no tile (open ocean has none) or unreadable
-            return None
-    else:
-        feats = pc.search(DEM_COLLECTION, lon, lat, eps=0.01)
-        if not feats:
-            return None
-        href = pc.sign(DEM_COLLECTION, feats[0]["assets"][DEM_ASSET]["href"])
-        arr, px_x_deg, px_y_deg = read_window(href, lon, lat, DEM_TPI_RADIUS)
-    return {
-        "grid": [[None if np.ma.is_masked(v) else float(v) for v in row] for row in arr],
-        "px_x_deg": px_x_deg, "px_y_deg": px_y_deg,
-    }
-
-
-def terrain_from_window(rec: dict, lat: float):
-    g = np.array([[np.nan if v is None else v for v in row] for row in rec["grid"]])
-    r = DEM_TPI_RADIUS
-    if not np.isfinite(g[r, r]):
-        return None
-    elevation = float(g[r, r])
-    dx = rec["px_x_deg"] * DEG_M * math.cos(math.radians(lat))
-    dy = rec["px_y_deg"] * DEG_M
-
-    c = g[r - 1:r + 2, r - 1:r + 2]              # 3x3 around the centre
-    slope = aspect_deg = north = east = None
-    if np.isfinite(c).all():
-        dzdx = ((c[0, 2] + 2 * c[1, 2] + c[2, 2]) - (c[0, 0] + 2 * c[1, 0] + c[2, 0])) / (8 * dx)
-        dzdy = ((c[2, 0] + 2 * c[2, 1] + c[2, 2]) - (c[0, 0] + 2 * c[0, 1] + c[0, 2])) / (8 * dy)
-        slope = math.degrees(math.atan(math.hypot(dzdx, dzdy)))
-        if slope > 1e-6:
-            aspect_deg = (90.0 - math.degrees(math.atan2(dzdy, -dzdx))) % 360.0
-            north = math.cos(math.radians(aspect_deg))
-            east = math.sin(math.radians(aspect_deg))
-
-    ring = g.copy(); ring[r, r] = np.nan
-    valid = np.isfinite(ring)
-    tpi = elevation - float(np.nanmean(ring)) if valid.any() else None
-    rough = float(np.sqrt(np.nanmean((ring[valid] - elevation) ** 2))) if valid.any() else None
-
-    return dict(elevation_m=elevation, slope_deg=slope, aspect_deg=aspect_deg,
-                aspect_northness=north, aspect_eastness=east, tpi_m=tpi, roughness_m=rough)
+            resp = wcs.getCoverage(identifier=cov, crs=crs, bbox=bbox, width=3, height=3,
+                                   response_crs=crs, format="GEOTIFF_INT16", timeout=120)
+            body = resp.read()
+            if "tiff" not in (resp.info().get("Content-Type", "") or "").lower():
+                refusal = service_exception(body)
+                if refusal is not None:
+                    raise ServiceRefused(refusal)
+                raise RuntimeError(body[:300].decode("utf-8", "replace"))
+            return read_centre(body)
+        except ServiceRefused:
+            raise                                   # the server answered: asking again changes nothing
+        except Exception:
+            if attempt == TRIES:
+                raise
+            time.sleep(10 * attempt)
 
 
 # --------------------------------------------------------------------------- cache
 class Cache:
     def __init__(self, path: Path):
-        self.path, self.data = path, {}
+        self.path, self.data, self.refused = path, {}, {}
         if path.exists():
             with open(path) as fh:
                 for line in fh:
@@ -193,105 +192,167 @@ class Cache:
                         r = json.loads(line)
                     except json.JSONDecodeError:
                         continue
-                    self.data[(r["kind"], r["key"])] = r["value"]
+                    key = (r["cov"], r["ck"])
+                    if r.get("refused") is not None:        # a recorded refusal (value NA)
+                        self.refused[key] = r["refused"]
+                        if RETRY_REFUSED:
+                            continue                        # not cached: it is asked again
+                    self.data[key] = r["raw"]
 
-    def add(self, kind, key, value):
-        self.data[(kind, key)] = value
+    def add(self, cov, ck, raw):
+        self.data[(cov, ck)] = raw
         with open(self.path, "a") as fh:
-            fh.write(json.dumps({"kind": kind, "key": key, "value": value}) + "\n")
+            fh.write(json.dumps({"cov": cov, "ck": ck, "raw": raw}) + "\n")
+
+    def add_refused(self, cov, ck, message):
+        self.data[(cov, ck)] = None
+        self.refused[(cov, ck)] = message
+        with open(self.path, "a") as fh:
+            fh.write(json.dumps({"cov": cov, "ck": ck, "raw": None, "refused": message}) + "\n")
 
 
 # --------------------------------------------------------------------------- points
 def read_points(path: Path):
     df = pd.read_csv(path)
-    missing = {"lat", "lon"} - set(df.columns)
+    missing = {"lat", "lon", "depth_cm"} - set(df.columns)
     if missing:
-        raise ValueError(f"{path} lacks column(s) {sorted(missing)}; required: lat, lon")
+        raise ValueError(f"{path} lacks column(s) {sorted(missing)}; required: lat, lon, depth_cm")
     lat = pd.to_numeric(df["lat"], errors="coerce")
     lon = pd.to_numeric(df["lon"], errors="coerce")
     bad = lat.isna() | lon.isna() | ~lat.between(-90, 90) | ~lon.between(-180, 180)
     if bad.any():
         raise ValueError(f"invalid lat/lon in rows {df.index[bad].tolist()[:10]} (decimal degrees, WGS84)")
-    return df, lat.to_numpy(float), lon.to_numpy(float)
+    depth = pd.to_numeric(df["depth_cm"], errors="coerce")
+    return df, lat.to_numpy(float), lon.to_numpy(float), depth.to_numpy(float)
+
+
+def layer_for(depth: float):
+    if not np.isfinite(depth) or depth < 0 or depth > LAYERS[-1][1]:
+        return None
+    for top, bottom in LAYERS:
+        if top <= depth < bottom:
+            return (top, bottom)
+    return LAYERS[-1]                               # depth == 200
 
 
 # --------------------------------------------------------------------------- main
 def main() -> int:
     logging.basicConfig(level=logging.INFO, stream=sys.stderr, force=True,
                         format="%(asctime)s %(levelname)-7s %(message)s", datefmt="%H:%M:%S")
-    logging.getLogger("rasterio").setLevel(logging.ERROR)   # PROJ chatter; reads here need no CRS
+    logging.getLogger("rasterio").setLevel(logging.ERROR)   # PROJ chatter; values need no CRS
     OUT_CSV.parent.mkdir(parents=True, exist_ok=True)
     TMP_DIR.mkdir(parents=True, exist_ok=True)
 
-    df, lat, lon = read_points(POINTS_CSV)
-    dem_keys = sorted({coord_key(lon[i], lat[i]) for i in range(len(df))})
-    log.info("%d points, %d unique coordinates", len(df), len(dem_keys))
+    df, lat, lon, depth = read_points(POINTS_CSV)
+    if ONLY_SUBSET and SUBSET_COLUMN in df.columns:      # only the flagged rows are fetched; the rest stay NA
+        use = df[SUBSET_COLUMN].astype(str).str.strip().str.lower().eq("yes").to_numpy()
+    else:
+        use = np.ones(len(df), dtype=bool)
+    coords = sorted({coord_key(lon[i], lat[i]) for i in np.flatnonzero(use)})
+    log.info("%d points, %d of them fetched (%s), %d unique coordinates, %d with a depth", len(df), int(use.sum()),
+             SUBSET_COLUMN if use.sum() < len(df) else "all rows", len(coords), int(np.isfinite(depth[use]).sum()))
 
+    # layers needed per coordinate: the top 30 cm (for <prop>_30cm_avg) and, only where a sample has a depth_cm,
+    # the layer containing it (for <prop>_depth_val). The other layers would never reach the output.
+    layers_needed = {}
+    for i in np.flatnonzero(use):
+        ck = coord_key(lon[i], lat[i])
+        layers = layers_needed.setdefault(ck, set(TOP30))
+        layer = layer_for(depth[i])
+        if layer:
+            layers.add(layer)
     cache = Cache(CACHE_JSONL)
-    dem_todo = [k for k in dem_keys if ("dem", k) not in cache.data]
-    log.info("DEM: %d cached, %d to fetch", len(dem_keys) - len(dem_todo), len(dem_todo))
+    todo, needed = [], 0
+    for ck, layers in layers_needed.items():
+        wanted = [(p, coverage_id(p, t, b)) for p in PROPERTIES for t, b in sorted(layers)]
+        wanted.append(("ocs", "ocs_0-30cm_mean"))
+        needed += len(wanted)
+        todo += [(p, cov, ck) for p, cov in wanted if (cov, ck) not in cache.data]
+    log.info("%d requests needed (%d cached) for %d properties: %s", len(todo), needed - len(todo),
+             len(PROPERTIES), ",".join(PROPERTIES))
 
-    session = make_session()
-    pc = Planetary(session)
-    failed = {}
-    if dem_todo:                                   # one known land tile (the Alps): fail early, with the reason
-        try:
-            ok = fetch_dem_window(pc, 8.5, 46.5)
-        except Exception as e:
-            raise RuntimeError(f"DEM preflight failed (DEM_SOURCE = {DEM_SOURCE!r}): {e}") from e
-        if ok is None:
-            raise RuntimeError(f"DEM preflight: no DEM pixel at 8.5E 46.5N (DEM_SOURCE = {DEM_SOURCE!r}); "
-                               f"check the network / the tile URL {dem_tile_url(8.5, 46.5)}")
-    with ThreadPoolExecutor(N_WORKERS) as pool:
-        futs = {}
-        for ck in dem_todo:
-            lo, la = map(float, ck.split(","))
-            futs[pool.submit(fetch_dem_window, pc, lo, la)] = ("dem", ck)
-        consecutive = 0
-        for i, fut in enumerate(as_completed(futs), 1):
-            kind, key = futs[fut]
+    services, failed, unavailable = Services(), {}, set()
+    with rasterio.Env(), ThreadPoolExecutor(N_WORKERS) as pool:
+        futures = {}
+        for p, cov, ck in todo:
             try:
-                cache.add(kind, key, fut.result())
-                consecutive = 0
+                (_, covs), _ = services.get(p)          # opens the service once, in main thread
             except Exception as e:
-                failed[(kind, key)] = str(e)
-                consecutive += 1
-                log.error("FAILED %s %s: %s", kind, key, str(e)[:200])
-                if consecutive >= MAX_CONSECUTIVE_FAILURES:
-                    for f in futs:
-                        f.cancel()
-                    log.error("%d requests in a row failed: stopping (cached values are kept; rerun later). "
-                              "If the DEM source keeps refusing: try DEM_SOURCE = 'aws', or set "
-                              "PC_SDK_SUBSCRIPTION_KEY for 'planetary'.", consecutive)
-                    break
-            if i % 20 == 0 or i == len(futs):
-                log.info("  %d/%d requests done", i, len(futs))
+                if p not in unavailable:
+                    log.error("service %s unavailable: %s", p, e)
+                unavailable.add(p)
+                continue
+            if cov not in covs:
+                unavailable.add(cov)
+                continue
+            lo, la = map(float, ck.split(","))
+            futures[pool.submit(fetch, services, p, cov, lo, la)] = (cov, ck)
+        t0 = time.monotonic()
+        for i, fut in enumerate(as_completed(futures), 1):
+            cov, ck = futures[fut]
+            try:
+                cache.add(cov, ck, fut.result())
+            except ServiceRefused as e:
+                cache.add_refused(cov, ck, str(e))          # NA, not retried, not a failure by itself
+            except Exception as e:
+                failed[(cov, ck)] = str(e)
+                log.error("FAILED %s at %s: %s", cov, ck, str(e)[:200])
+            if i % 100 == 0 or i == len(futures):
+                rate = i / max(time.monotonic() - t0, 1e-9)
+                log.info("  %d/%d requests done (%.1f/s, about %.1f h left)", i, len(futures), rate,
+                         (len(futures) - i) / rate / 3600)
+    if unavailable:
+        log.warning("not offered by the WCS (left empty): %s", ", ".join(sorted(unavailable)))
 
     # ---- assemble -----------------------------------------------------------
-    terrain_cols = ["elevation_m", "slope_deg", "aspect_deg", "aspect_northness", "aspect_eastness",
-                    "tpi_m", "roughness_m"]
-    out_rows, no_dem = [], 0
-    for i in range(len(df)):
-        rec = cache.data.get(("dem", coord_key(lon[i], lat[i])))
-        terr = terrain_from_window(rec, lat[i]) if rec else None
-        if terr is None:
-            no_dem += 1
-            out_rows.append({c: np.nan for c in terrain_cols})
-        else:
-            out_rows.append(terr)
+    def value(prop, top, bottom, ck, factor):
+        raw = cache.data.get((coverage_id(prop, top, bottom), ck))
+        return np.nan if raw is None else raw / factor
 
-    out = pd.concat([df, pd.DataFrame(out_rows)], axis=1)
-    for c in terrain_cols:
-        out[c] = out[c].astype(float).round(4)
+    avg = {f"{p}_30cm_avg": [] for p in PROPERTIES}
+    avg["ocs_30cm_avg"] = []
+    at_depth = {f"{p}_depth_val": [] for p in PROPERTIES}
+    for i in range(len(df)):
+        if not use[i]:                                  # not in the subset: NA everywhere
+            for p in PROPERTIES:
+                avg[f"{p}_30cm_avg"].append(np.nan)
+                at_depth[f"{p}_depth_val"].append(np.nan)
+            avg["ocs_30cm_avg"].append(np.nan)
+            continue
+        ck = coord_key(lon[i], lat[i])
+        layer = layer_for(depth[i])
+        for p, f in PROPERTIES.items():
+            v = [value(p, t, b, ck, f) for t, b in TOP30]
+            w = [b - t for t, b in TOP30]
+            avg[f"{p}_30cm_avg"].append(np.nan if np.isnan(v).any() else float(np.dot(v, w) / sum(w)))
+            at_depth[f"{p}_depth_val"].append(value(p, *layer, ck, f) if layer else np.nan)
+        raw = cache.data.get(("ocs_0-30cm_mean", ck))
+        avg["ocs_30cm_avg"].append(np.nan if raw is None else raw / OCS_FACTOR)
+
+    out = pd.concat([df, pd.DataFrame(avg).round(4), pd.DataFrame(at_depth).round(4)], axis=1)
     out.to_csv(OUT_CSV, index=False, na_rep="NA")
     log.info("wrote %s", OUT_CSV)
 
-    if no_dem:
-        log.warning("%d point(s) with no usable DEM pixel (tile gap, void, or ocean)", no_dem)
+    too_many_refused = False
+    if cache.refused:
+        refused_coords = sorted({ck for (_, ck) in cache.refused})
+        lats = [float(ck.split(",")[1]) for ck in refused_coords]
+        log.warning("%d of %d coordinate(s) were refused by the WCS for at least one layer (NA in the output); "
+                    "latitudes %.1f to %.1f", len(refused_coords), len(coords), min(lats), max(lats))
+        for msg, n in Counter(cache.refused.values()).most_common(3):
+            log.warning("  %d x  %s", n, msg)
+        if len(refused_coords) > MAX_REFUSED_FRACTION * len(coords):
+            log.error("more than %.0f%% of the coordinates were refused: that points at a bug or a service "
+                      "problem, not at the edge of the map", 100 * MAX_REFUSED_FRACTION)
+            too_many_refused = True
+
+    n_bad_depth = int((np.isfinite(depth) & np.array([layer_for(d) is None for d in depth])).sum())
+    if n_bad_depth:
+        log.warning("%d depth_cm value(s) outside 0-200 cm -> _depth_val left empty", n_bad_depth)
     if failed:
         log.error("%d request(s) failed; rerun to retry them (cached values are reused)", len(failed))
         return 1
-    return 0
+    return 1 if too_many_refused else 0
 
 
 if __name__ == "__main__":
