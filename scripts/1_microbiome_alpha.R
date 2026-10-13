@@ -12,7 +12,8 @@
 #
 # Input : <data_folder>/sample_data_filtered.csv  (from microbeatlas_filter_data.R)
 # Output: <out_folder>/fig1_alpha_overview.png, model reports, test tables, panel objects
-# Usage : Rscript 1_alpha_overview.R [data_folder] [out_folder]
+# Usage : Rscript 1_alpha_overview.R [data_folder] [results_folder]
+#         (Snakemake passes both from smk_config.yaml; results_folder defaults to <data_folder>/../results)
 # =============================================================================
 
 suppressPackageStartupMessages({
@@ -28,8 +29,8 @@ suppressPackageStartupMessages({
 args <- commandArgs(trailingOnly = TRUE)
 data_folder <- if (length(args) >= 1) as.character(args[1]) else
   "/home/renku/work/epfl-altshuler/GlobalAlpineSoilMicrobiome/data"
-out_folder  <- if (length(args) >= 2) as.character(args[2]) else
-  file.path(dirname(data_folder), "results", "1_alpha_overview")
+results_folder <- if (length(args) >= 2) as.character(args[2]) else file.path(dirname(data_folder), "results")
+out_folder  <- file.path(results_folder, "1_alpha_overview")
 dir.create(out_folder, recursive = TRUE, showWarnings = FALSE)
 
 CFG <- list(
@@ -60,14 +61,14 @@ read_filtered_table <- function(path, geo_col = "GPT_Geotext") {
   first <- readLines(path, n = 2)
   if (length(first) >= 2 && substr(first[2], 1, 1) == "\"")
     return(read.csv(path, stringsAsFactors = FALSE))
-  
+
   lines <- readLines(path)
   hdr <- strsplit(lines[1], ",", fixed = TRUE)[[1]]; n <- length(hdr); lines <- lines[-1]
-  
+
   m <- gregexpr("\\{[^{}]*\\}", lines)                       # protect commas inside {...}
   regmatches(lines, m) <- lapply(regmatches(lines, m), function(z) gsub(",", "\001", z, fixed = TRUE))
   parts <- strsplit(lines, ",", fixed = TRUE); rm(lines, m)
-  
+
   g <- match(geo_col, hdr)
   extra_rows <- which(lengths(parts) > n)
   if (length(extra_rows)) {
@@ -81,16 +82,16 @@ read_filtered_table <- function(path, geo_col = "GPT_Geotext") {
   ok_len <- lengths(parts) == n
   mat <- matrix(unlist(parts[ok_len], use.names = FALSE), ncol = n, byrow = TRUE); rm(parts)
   colnames(mat) <- hdr
-  
+
   valid <- rep(TRUE, nrow(mat))
   if (all(c("Latitude", "Longitude", "Alpine") %in% hdr))
     valid <- is.finite(suppressWarnings(as.numeric(mat[, "Latitude"]))) &
-    is.finite(suppressWarnings(as.numeric(mat[, "Longitude"]))) &
-    mat[, "Alpine"] %in% c("Alpine", "Lowland")
+             is.finite(suppressWarnings(as.numeric(mat[, "Longitude"]))) &
+             mat[, "Alpine"] %in% c("Alpine", "Lowland")
   message(sprintf("%s: %d lines | %d with extra fields merged into %s | %d with too few fields | %d invalid rows dropped",
                   basename(path), length(ok_len), length(extra_rows), geo_col, sum(!ok_len), sum(!valid)))
   mat <- mat[valid, , drop = FALSE]
-  
+
   df <- as.data.frame(mat, stringsAsFactors = FALSE)
   df[] <- lapply(df, function(x) type.convert(gsub("\001", ",", x, fixed = TRUE), as.is = TRUE))
   df
@@ -368,7 +369,7 @@ pE <- ggplot(att_tab, aes(pct, model)) +
   facet_wrap(~response, ncol = 1, scales = "free_x") +
   scale_x_continuous(expand = expansion(mult = c(0.05, 0.3))) +
   labs(tag = "E", x = "Alpine vs same samples as lowland (%, 95% CI)", y = NULL,
-       subtitle = "Alpine effect on the alpine samples; stars: differs from 0") +
+       subtitle = "Stars: differs from 0") +
   theme_fig + theme(strip.text = element_text(size = 9))
 
 ## ---- 8. Assemble and save --------------------------------------------------------------------

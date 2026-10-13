@@ -46,7 +46,8 @@
 # Input : <data_folder>/sample_data_filtered.csv, elevation from env_file and, for part B,
 #         the filtered BIOM written by microbeatlas_filter_data.R
 # Output: <out_folder>/alpha/ and <out_folder>/beta/
-# Usage : Rscript 2_alpha_beta_elevation_latitude.R [data_folder] [out_folder]
+# Usage : Rscript 2_alpha_beta_elevation_latitude.R [data_folder] [results_folder]
+#         (Snakemake passes both from smk_config.yaml; results_folder defaults to <data_folder>/../results)
 # =============================================================================
 
 suppressPackageStartupMessages({
@@ -69,18 +70,18 @@ TEST_MODE <- FALSE   # TRUE: tiny beta run (few samples, 1 replicate) to check t
 args <- commandArgs(trailingOnly = TRUE)
 data_folder <- if (length(args) >= 1) as.character(args[1]) else
   "/home/renku/work/epfl-altshuler/GlobalAlpineSoilMicrobiome/data"
-out_folder  <- if (length(args) >= 2) as.character(args[2]) else
-  file.path(dirname(data_folder), "results", "2_alpha_beta_elevation_latitude")
+results_folder <- if (length(args) >= 2) as.character(args[2]) else file.path(dirname(data_folder), "results")
+out_folder  <- file.path(results_folder, "2_alpha_beta_elevation_latitude")
 
 CFG <- list(
   # --- input ---
   alpha_file  = file.path(data_folder, "sample_data_filtered.csv"),
-  env_file    = file.path(dirname(data_folder), "results", "all_sampled_data.csv"),  # elevation (DEM)
+  env_file    = file.path(results_folder, "all_sampled_data.csv"),   # elevation (DEM) etc., written by download_earth_data
   alpha_id    = "Sample_acc",   # sample ID column in sample_data_filtered.csv   (check!)
   env_id      = "site",         # matching ID column in env_file                  (check!)
   env_elev    = "elevation",    # elevation column (metres) in env_file           (check!)
   biom_file   = file.path(data_folder, "microbeatlas",
-                          "samples-otus.97.mapped.metag.minfilter.refilt_filtered.biom"),
+                          "otuTable_soilCurated_OTU97_nextMAPrelease_filtered.biom"),   # written by the Snakemake rule filter_biom
   biom_id     = "Accessions",   # column of alpha_file that matches the BIOM sample IDs
   # --- part A ---
   abs_lat     = TRUE,           # TRUE: |latitude|; FALSE: signed latitude
