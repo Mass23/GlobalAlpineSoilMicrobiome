@@ -7,6 +7,10 @@ Run     python3 download_soilgrids.py [points.csv soilgrids_data.csv [properties
         optional comma-separated list (e.g. phh2o,soc,nitrogen,clay,sand,silt,cec,bdod); empty = all.
         SOILGRIDS_WORKERS (environment variable) sets the number of parallel requests (default 4).
 
+Subset: when points.csv has a `lowland_subset` column, only the rows marked "yes" (all alpine samples plus a
+random lowland subset of the same size, drawn in the Snakefile rule prepare_points) are fetched; the other rows
+stay NA. Without that column every row is fetched (ONLY_SUBSET = False also fetches everything).
+
 Speed: one WCS request per coordinate x property x layer is the whole cost (about 2.6 requests/s with 4
 workers). Only the layers the output needs are requested: the top three (0-5, 5-15, 15-30 cm) for every
 coordinate, plus a deeper layer only where a sample's depth_cm falls in it. Choosing fewer properties is
@@ -84,6 +88,8 @@ STAT = "mean"
 HALF_WIDTH_DEG = 0.003375                           # 3 x 3 tile of ~0.00225 deg (~250 m) pixels
 N_WORKERS = int(os.environ.get("SOILGRIDS_WORKERS", 4))   # parallel requests; keep modest for ISRIC
 TRIES = 3                                           # for network / server trouble only (see docstring)
+SUBSET_COLUMN = "lowland_subset"                    # points.csv column: "yes" = alpine + random lowland subset
+ONLY_SUBSET = True                                  # False: fetch every row even if that column exists
 MAX_REFUSED_FRACTION = 0.05                         # more refused coordinates than this = suspect, exit 1
 RETRY_REFUSED = False                               # True: ask again for coordinates refused in an earlier run
 
@@ -238,14 +244,18 @@ def main() -> int:
     TMP_DIR.mkdir(parents=True, exist_ok=True)
 
     df, lat, lon, depth = read_points(POINTS_CSV)
-    coords = sorted({coord_key(lon[i], lat[i]) for i in range(len(df))})
-    log.info("%d points, %d unique coordinates, %d with a depth", len(df), len(coords),
-             int(np.isfinite(depth).sum()))
+    if ONLY_SUBSET and SUBSET_COLUMN in df.columns:      # only the flagged rows are fetched; the rest stay NA
+        use = df[SUBSET_COLUMN].astype(str).str.strip().str.lower().eq("yes").to_numpy()
+    else:
+        use = np.ones(len(df), dtype=bool)
+    coords = sorted({coord_key(lon[i], lat[i]) for i in np.flatnonzero(use)})
+    log.info("%d points, %d of them fetched (%s), %d unique coordinates, %d with a depth", len(df), int(use.sum()),
+             SUBSET_COLUMN if use.sum() < len(df) else "all rows", len(coords), int(np.isfinite(depth[use]).sum()))
 
     # layers needed per coordinate: the top 30 cm (for <prop>_30cm_avg) and, only where a sample has a depth_cm,
     # the layer containing it (for <prop>_depth_val). The other layers would never reach the output.
     layers_needed = {}
-    for i in range(len(df)):
+    for i in np.flatnonzero(use):
         ck = coord_key(lon[i], lat[i])
         layers = layers_needed.setdefault(ck, set(TOP30))
         layer = layer_for(depth[i])
@@ -303,6 +313,12 @@ def main() -> int:
     avg["ocs_30cm_avg"] = []
     at_depth = {f"{p}_depth_val": [] for p in PROPERTIES}
     for i in range(len(df)):
+        if not use[i]:                                  # not in the subset: NA everywhere
+            for p in PROPERTIES:
+                avg[f"{p}_30cm_avg"].append(np.nan)
+                at_depth[f"{p}_depth_val"].append(np.nan)
+            avg["ocs_30cm_avg"].append(np.nan)
+            continue
         ck = coord_key(lon[i], lat[i])
         layer = layer_for(depth[i])
         for p, f in PROPERTIES.items():
