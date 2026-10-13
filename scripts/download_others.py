@@ -56,9 +56,14 @@ from urllib3.util.retry import Retry
 import planetary_computer
 
 # --------------------------------------------------------------------------- settings
-POINTS_CSV = Path("/home/renku/work/GlobalAlpineSoilMicrobiome/data/points.csv")
-OUT_CSV = Path("/home/renku/work/GlobalAlpineSoilMicrobiome/data/other_data.csv")
-TMP_DIR = Path("data/tmp")
+import sys
+
+POINTS_CSV = sys.argv[1]
+OUT_CSV = sys.argv[2]
+#POINTS_CSV = Path("/home/renku/work/GlobalAlpineSoilMicrobiome/data/points.csv")
+#OUT_CSV = Path("/home/renku/work/GlobalAlpineSoilMicrobiome/data/other_data.csv")
+TMP_DIR = Path("/home/renku/work/epfl-altshuler/GlobalAlpineSoilMicrobiome/tmp")
+
 CACHE_JSONL = TMP_DIR / "other_data_cache.jsonl"
 
 STAC_URL = "https://planetarycomputer.microsoft.com/api/stac/v1/search"

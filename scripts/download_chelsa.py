@@ -57,9 +57,14 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 # --------------------------------------------------------------------------- settings
-PROJECT_DIR = Path("/home/renku/work/GlobalAlpineSoilMicrobiome")
-POINTS_CSV = PROJECT_DIR / "data/points.csv"
-OUT_CSV = PROJECT_DIR / "data/chelsa_data.csv"
+import sys
+
+POINTS_CSV = sys.argv[1]
+OUT_CSV = sys.argv[2]
+
+PROJECT_DIR = Path("/home/renku/work/epfl-altshuler/GlobalAlpineSoilMicrobiome")
+#POINTS_CSV = PROJECT_DIR / "data/points.csv"
+#OUT_CSV = PROJECT_DIR / "data/chelsa_data.csv"
 PROV_CSV = PROJECT_DIR / "data/chelsa_data_provenance.csv"
 TMP_DIR = PROJECT_DIR / "data/tmp"
 PLAN_CSV = TMP_DIR / "chelsa_plan.csv"

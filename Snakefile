@@ -123,7 +123,7 @@ rule download_chelsa:
         "envs/chelsa/environment.yml"
     shell:
         """
-        python3 scripts/download_chelsa.py
+        python3 scripts/download_chelsa.py {input.DATA_POINTS} {output.CHELSA_CSV}
         """
 
 rule download_soilgrids:
@@ -135,7 +135,7 @@ rule download_soilgrids:
         "envs/soilgrids/environment.yml"
     shell:
         """
-        python3 scripts/download_soilgrids.py
+        python3 scripts/download_soilgrids.py {input.DATA_POINTS} {output.SOIL_CSV}
         """
 
 rule download_other_data:
@@ -147,7 +147,7 @@ rule download_other_data:
         "envs/others/environment.yml"
     shell:
         """
-        python3 scripts/download_others.py
+        python3 scripts/download_others.py {input.DATA_POINTS} {output.OTHER_CSV}
         """
 
 rule download_earth_data:
