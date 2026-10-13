@@ -17,17 +17,18 @@ library(vegan)
 
 # =============================================================================
 # microbeatlas_filter_data.R
-# Builds the filtered SAMPLE table (coordinates, alpine flag, read counts, alpha metrics) and the
-# list of sample accessions to keep. It does NOT write a BIOM any more: the BIOM is subset by the
+# Builds the filtered SAMPLE table (coordinates, alpine flag, read counts, alpha metrics), written as a TSV
+# (the text fields contain commas but no tabs), and the list of sample accessions to keep. It does NOT write a BIOM any more: the BIOM is subset by the
 # Snakemake rule `filter_biom` (biom subset-table, envs/biom_filter/environment.yml), using
 #   <data_folder>/sample_accessions.txt     (one accession per line)
-# Usage  : Rscript scripts/microbeatlas_filter_data.R <data_folder> [csv_out] [accessions_out]
+# Usage  : Rscript scripts/microbeatlas_filter_data.R <data_folder> [tsv_out] [accessions_out]
 #   data_folder : smk_config.yaml data_folder: the raw inputs (MicrobeAtlas files, shapefiles) AND the derived
 #                 data live there
-# Outputs: <data_folder>/sample_data_filtered.csv and <data_folder>/sample_accessions.txt, unless csv_out /
+# Outputs: <data_folder>/sample_data_filtered.tsv (tab-separated, no quoting) and
+#          <data_folder>/sample_accessions.txt, unless tsv_out /
 #          accessions_out are given.
 # =============================================================================
-message(">>> microbeatlas_filter_data.R v2026-10-13c (sample table + accession list; BIOM subset by Snakemake) <<<")
+message(">>> microbeatlas_filter_data.R v2026-10-13d (sample table as TSV + accession list; BIOM subset by Snakemake) <<<")
 args <- commandArgs(trailingOnly = TRUE)
 # Snakemake passes the data folder as the first argument; fall back to the default path when run by hand
 data_folder = if (length(args) >= 1) as.character(args[1]) else "/home/renku/work/epfl-altshuler/GlobalAlpineSoilMicrobiome/data"
@@ -41,76 +42,35 @@ TEST_MODE <- FALSE   # set TRUE to test
 N_TEST    <- 100
 
 # ---- Resume switch ----
-# FALSE (default): if the filtered CSV already exists, do not recompute anything: only (re)write the
+# FALSE (default): if the filtered TSV already exists, do not recompute anything: only (re)write the
 #                  accession list from it.
-# TRUE: ignore the existing CSV and redo everything.
+# TRUE: ignore the existing TSV and redo everything.
 FORCE_RERUN <- FALSE
-
-# ---- One-time repair of an UNQUOTED csv ----
-# An existing sample_data_filtered.csv written with quote = F cannot be read by pandas (prepare_points).
-# Set TRUE and run the script ONCE by hand: the CSV is parsed with the brace-aware loader and rewritten
-# with quoted fields (via a temp file). Then set it back to FALSE. It is not done automatically, so a
-# Snakemake job can never modify a file that another job is reading.
-REWRITE_QUOTED <- FALSE
 
 # ---- Output paths ----
 # data_folder (from smk_config.yaml) holds the raw inputs and receives the outputs, unless other paths are
 # given as 2nd / 3rd argument.
 suffix  <- if (TEST_MODE) "_TEST" else ""
 add_suffix <- function(path) sub("(\\.[^.]+)$", paste0(suffix, "\\1"), path)
-csv_out <- add_suffix(if (length(args) >= 2) args[2] else file.path(data_folder, "sample_data_filtered.csv"))
+tsv_out <- add_suffix(if (length(args) >= 2) args[2] else file.path(data_folder, "sample_data_filtered.tsv"))
 acc_out <- add_suffix(if (length(args) >= 3) args[3] else file.path(data_folder, "sample_accessions.txt"))
-dir.create(dirname(csv_out), recursive = TRUE, showWarnings = FALSE)
+dir.create(dirname(tsv_out), recursive = TRUE, showWarnings = FALSE)
 
 # ---- Helper functions ----
 
-# Reads sample_data_filtered.csv even when it was written WITHOUT quotes (quote = F).
-#  * commas inside {...} are protected: everything within braces is ONE field;
-#  * rows that still have extra fields (unbraced commas in free text such as
-#    "Washington state, USA") get the extras merged back into the geo_col column;
-#  * rows that still do not fit (non-numeric coordinates, Alpine not Alpine/Lowland, too few
-#    fields) are dropped and counted.
-# A properly quoted CSV (first data line starts with a quote) is read with read.csv as usual.
-read_filtered_table <- function(path, geo_col = "GPT_Geotext") {
-  first <- readLines(path, n = 2)
-  if (length(first) >= 2 && substr(first[2], 1, 1) == "\"")
-    return(read.csv(path, stringsAsFactors = FALSE))
-
-  lines <- readLines(path)
-  hdr <- strsplit(lines[1], ",", fixed = TRUE)[[1]]; n <- length(hdr); lines <- lines[-1]
-
-  m <- gregexpr("\\{[^{}]*\\}", lines)                       # protect commas inside {...}
-  regmatches(lines, m) <- lapply(regmatches(lines, m), function(z) gsub(",", "\001", z, fixed = TRUE))
-  parts <- strsplit(lines, ",", fixed = TRUE); rm(lines, m)
-
-  g <- match(geo_col, hdr)
-  extra_rows <- which(lengths(parts) > n)
-  if (length(extra_rows)) {
-    if (is.na(g)) stop("Rows with extra fields, but column '", geo_col, "' not found in the header")
-    parts[extra_rows] <- lapply(parts[extra_rows], function(p) {
-      e <- length(p) - n
-      rest <- if (g + e < length(p)) p[(g + e + 1):length(p)] else character(0)
-      c(p[seq_len(g - 1)], paste(p[g:(g + e)], collapse = ","), rest)
-    })
-  }
-  ok_len <- lengths(parts) == n
-  mat <- matrix(unlist(parts[ok_len], use.names = FALSE), ncol = n, byrow = TRUE); rm(parts)
-  colnames(mat) <- hdr
-
-  valid <- rep(TRUE, nrow(mat))
-  if (all(c("Latitude", "Longitude", "Alpine") %in% hdr))
-    valid <- is.finite(suppressWarnings(as.numeric(mat[, "Latitude"]))) &
-             is.finite(suppressWarnings(as.numeric(mat[, "Longitude"]))) &
-             mat[, "Alpine"] %in% c("Alpine", "Lowland")
-  message(sprintf("%s: %d lines | %d with extra fields merged into %s | %d with too few fields | %d invalid rows dropped",
-                  basename(path), length(ok_len), length(extra_rows), geo_col, sum(!ok_len), sum(!valid)))
-  mat <- mat[valid, , drop = FALSE]
-
-  df <- as.data.frame(mat, stringsAsFactors = FALSE)
-  df[] <- lapply(df, function(x) type.convert(gsub("\001", ",", x, fixed = TRUE), as.is = TRUE))
-  df
+# The sample table is a TSV without quoting: its text fields contain commas (and braces) but no tabs.
+# Tabs / line breaks inside a text field are replaced by a space when writing; the file is written to a temp
+# file and renamed, so a crash cannot leave a truncated table. Always READ it with quote = "" (a stray double
+# quote in a text field must not swallow the following lines).
+write_tsv_safe <- function(df, path) {
+  chr <- vapply(df, is.character, logical(1))
+  df[chr] <- lapply(df[chr], function(x) gsub("[\t\r\n]+", " ", x))
+  tmp <- paste0(path, ".tmp")
+  write.table(df, file = tmp, sep = "\t", quote = FALSE, row.names = FALSE, na = "NA")
+  stopifnot(file.rename(tmp, path))
 }
-
+read_tsv_table <- function(path)
+  read.delim(path, quote = "", comment.char = "", stringsAsFactors = FALSE, check.names = FALSE, fill = FALSE)
 
 # BIOM counts as a sparse matrix (OTUs x samples), whatever rbiom stores them as
 # (slam simple_triplet_matrix in older versions, Matrix sparse matrix in newer ones)
@@ -177,34 +137,20 @@ biom_path <- file.path(data_folder, "microbeatlas/otuTable_soilCurated_OTU97_nex
 
 # =====================================================================================
 # Two cases:
-#   1. CSV exists (and not FORCE_RERUN) -> only write the accession list from it
+#   1. TSV exists (and not FORCE_RERUN) -> only write the accession list from it
 #   2. otherwise                        -> full pipeline: sample table + accession list
 # =====================================================================================
 
-if (!FORCE_RERUN && file.exists(csv_out)) {
+if (!FORCE_RERUN && file.exists(tsv_out)) {
   
   # ---------------------------------------------------------------- ACCESSION LIST ONLY
-  message(csv_out, " already exists: only writing the accession list.")
-  # The CSV may have been written with quote = F (commas inside text fields): the loader copes with both
-  csv_tab <- read_filtered_table(csv_out)
-  stopifnot("column 'Accessions' not found in the CSV" = "Accessions" %in% names(csv_tab))
-  acc <- unique(csv_tab$Accessions)
-  stopifnot("no accession could be read from the CSV" = length(acc) > 0)
-  
-  first_line <- readLines(csv_out, n = 2)[2]
-  if (!startsWith(first_line, "\"")) {
-    if (REWRITE_QUOTED) {
-      tmp <- paste0(csv_out, ".tmp")
-      write.csv(csv_tab, tmp, row.names = FALSE)
-      stopifnot(file.rename(tmp, csv_out))
-      message("Rewrote ", csv_out, " with quoted fields (", nrow(csv_tab), " rows): pandas can read it now")
-    } else {
-      warning(csv_out, " is NOT quoted: pandas (rule prepare_points) cannot read it. ",
-              "Set REWRITE_QUOTED <- TRUE and run this script once by hand.")
-    }
-  }
-  writeLines(acc, acc_out)                                  # written last: newer than the CSV
-  message("Wrote ", acc_out, " (", length(acc), " accessions; ", nrow(csv_tab), " CSV rows)")
+  message(tsv_out, " already exists: only writing the accession list.")
+  tab <- read_tsv_table(tsv_out)
+  stopifnot("column 'Accessions' not found in the table" = "Accessions" %in% names(tab))
+  acc <- unique(tab$Accessions)
+  stopifnot("no accession could be read from the table" = length(acc) > 0)
+  writeLines(acc, acc_out)
+  message("Wrote ", acc_out, " (", length(acc), " accessions; ", nrow(tab), " table rows)")
   
 } else {
   
@@ -334,9 +280,9 @@ if (!FORCE_RERUN && file.exists(csv_out)) {
   #sample_env_filtered_alpha_dist$Alpine[(sample_env_filtered_alpha_dist$Alpine == 'Lowland') &
   #                                       (sample_env_filtered_alpha_dist$dist_to_alpine < 20)] = 'Perialpine'
   
-  # Sample table: quoted CSV (text fields can contain commas; scripts 1-2 read both quoted and unquoted)
-  write.csv(sample_env_filtered_alpha, file = csv_out, row.names = F)
+  # Sample table: TSV, no quoting (text fields contain commas but no tabs)
+  write_tsv_safe(sample_env_filtered_alpha, tsv_out)
   # Accession list for the Snakemake rule filter_biom (biom subset-table -s): one accession per line
   writeLines(unique(sample_env_filtered_alpha$Accessions), acc_out)
-  message("Wrote ", csv_out, " and ", acc_out, " (", nrow(sample_env_filtered_alpha), " samples)")
+  message("Wrote ", tsv_out, " and ", acc_out, " (", nrow(sample_env_filtered_alpha), " samples)")
 }

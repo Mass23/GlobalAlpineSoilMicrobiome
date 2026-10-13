@@ -10,10 +10,10 @@
 #   E (bottom right)    : alpine-vs-lowland difference in richness and Shannon with and without
 #                         adjusting for the unmapped proportion: does it explain the discrepancy?
 #
-# Input : <data_folder>/sample_data_filtered.csv  (from microbeatlas_filter_data.R)
+# Input : <data_folder>/sample_data_filtered.tsv  (from microbeatlas_filter_data.R)
 # Output: <out_folder>/fig1_alpha_overview.png, model reports, test tables, panel objects
-# Usage : Rscript 1_alpha_overview.R [data_folder] [results_folder]
-#         (Snakemake passes both from smk_config.yaml; results_folder defaults to <data_folder>/../results)
+# Usage : Rscript 1_alpha_overview.R [sample_table] [out_folder]
+#         Snakemake passes the exact paths (all file names are defined in the Snakefile only)
 # =============================================================================
 
 suppressPackageStartupMessages({
@@ -27,14 +27,14 @@ suppressPackageStartupMessages({
 
 ## ---- 0. Folders and configuration --------------------------------------------
 args <- commandArgs(trailingOnly = TRUE)
-data_folder <- if (length(args) >= 1) as.character(args[1]) else
-  "/home/renku/work/epfl-altshuler/GlobalAlpineSoilMicrobiome/data"
-results_folder <- if (length(args) >= 2) as.character(args[2]) else file.path(dirname(data_folder), "results")
-out_folder  <- file.path(results_folder, "1_alpha_overview")
+# Snakemake passes: args[1] = sample table (TSV), args[2] = output folder. The defaults are for running by hand.
+data_folder  <- "/home/renku/work/epfl-altshuler/GlobalAlpineSoilMicrobiome/data"
+sample_table <- if (length(args) >= 1) as.character(args[1]) else file.path(data_folder, "sample_data_filtered.tsv")
+out_folder   <- if (length(args) >= 2) as.character(args[2]) else file.path(dirname(data_folder), "results", "1_alpha_overview")
 dir.create(out_folder, recursive = TRUE, showWarnings = FALSE)
 
 CFG <- list(
-  alpha_file  = file.path(data_folder, "sample_data_filtered.csv"),
+  alpha_file  = sample_table,
   map_ylim    = c(-60, 83),     # latitude window of the map (Antarctica is cut by default)
   pt_size     = c(Lowland = 0.5,  Alpine = 0.8),    # map point sizes
   pt_alpha    = c(Lowland = 0.35, Alpine = 0.8),    # map point transparencies
@@ -50,54 +50,12 @@ CFG <- list(
 set.seed(1)
 
 ## ---- 1. Data -------------------------------------------------------------------
-# Reads sample_data_filtered.csv even when it was written WITHOUT quotes (quote = F).
-#  * commas inside {...} are protected: everything within braces is ONE field;
-#  * rows that still have extra fields (unbraced commas in free text such as
-#    "Washington state, USA") get the extras merged back into the geo_col column;
-#  * rows that still do not fit (non-numeric coordinates, Alpine not Alpine/Lowland, too few
-#    fields) are dropped and counted.
-# A properly quoted CSV (first data line starts with a quote) is read with read.csv as usual.
-read_filtered_table <- function(path, geo_col = "GPT_Geotext") {
-  first <- readLines(path, n = 2)
-  if (length(first) >= 2 && substr(first[2], 1, 1) == "\"")
-    return(read.csv(path, stringsAsFactors = FALSE))
+# The sample table is a TSV without quoting (its text fields contain commas): read it with quote = "" so that
+# a stray double quote cannot swallow the following lines; fill = FALSE makes a misaligned row an error.
+read_sample_table <- function(path)
+  read.delim(path, quote = "", comment.char = "", stringsAsFactors = FALSE, check.names = FALSE, fill = FALSE)
 
-  lines <- readLines(path)
-  hdr <- strsplit(lines[1], ",", fixed = TRUE)[[1]]; n <- length(hdr); lines <- lines[-1]
-
-  m <- gregexpr("\\{[^{}]*\\}", lines)                       # protect commas inside {...}
-  regmatches(lines, m) <- lapply(regmatches(lines, m), function(z) gsub(",", "\001", z, fixed = TRUE))
-  parts <- strsplit(lines, ",", fixed = TRUE); rm(lines, m)
-
-  g <- match(geo_col, hdr)
-  extra_rows <- which(lengths(parts) > n)
-  if (length(extra_rows)) {
-    if (is.na(g)) stop("Rows with extra fields, but column '", geo_col, "' not found in the header")
-    parts[extra_rows] <- lapply(parts[extra_rows], function(p) {
-      e <- length(p) - n
-      rest <- if (g + e < length(p)) p[(g + e + 1):length(p)] else character(0)
-      c(p[seq_len(g - 1)], paste(p[g:(g + e)], collapse = ","), rest)
-    })
-  }
-  ok_len <- lengths(parts) == n
-  mat <- matrix(unlist(parts[ok_len], use.names = FALSE), ncol = n, byrow = TRUE); rm(parts)
-  colnames(mat) <- hdr
-
-  valid <- rep(TRUE, nrow(mat))
-  if (all(c("Latitude", "Longitude", "Alpine") %in% hdr))
-    valid <- is.finite(suppressWarnings(as.numeric(mat[, "Latitude"]))) &
-             is.finite(suppressWarnings(as.numeric(mat[, "Longitude"]))) &
-             mat[, "Alpine"] %in% c("Alpine", "Lowland")
-  message(sprintf("%s: %d lines | %d with extra fields merged into %s | %d with too few fields | %d invalid rows dropped",
-                  basename(path), length(ok_len), length(extra_rows), geo_col, sum(!ok_len), sum(!valid)))
-  mat <- mat[valid, , drop = FALSE]
-
-  df <- as.data.frame(mat, stringsAsFactors = FALSE)
-  df[] <- lapply(df, function(x) type.convert(gsub("\001", ",", x, fixed = TRUE), as.is = TRUE))
-  df
-}
-
-raw <- read_filtered_table(CFG$alpha_file)
+raw <- read_sample_table(CFG$alpha_file)
 required <- c("Longitude", "Latitude", "Alpine", "alpha_total_n_reads", "alpha_n_otus",
               "alpha_shannon", "total_raw_counts", "unmapped_raw_counts")
 missing_cols <- setdiff(required, names(raw))

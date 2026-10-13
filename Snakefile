@@ -1,9 +1,10 @@
+import csv
 import os
 
 configfile: "smk_config.yaml"
 
 # Where the data and the results live is set in smk_config.yaml (e.g. under epfl-altshuler):
-#   data_folder:    raw MicrobeAtlas inputs AND derived data (filtered tables, points, CHELSA / SoilGrids / other csv)
+#   data_folder:    raw MicrobeAtlas inputs AND derived data (filtered table, points, CHELSA / SoilGrids / other csv)
 #   results_folder: all_sampled_data.csv and the figures (optional; default: a "results" folder next to data_folder)
 DATA = config["data_folder"].rstrip("/")
 RESULTS = config.get("results_folder", os.path.join(os.path.dirname(DATA), "results")).rstrip("/")
@@ -12,7 +13,10 @@ CHELSA_CSV = f"{DATA}/chelsa_data.csv"
 SOIL_CSV = f"{DATA}/soilgrids_data.csv"
 OTHER_CSV = f"{DATA}/other_data.csv"
 
-SAMPLE_DATA_FILTERED = f"{DATA}/sample_data_filtered.csv"
+# ALL FILE NAMES ARE DEFINED HERE ONLY: the rules hand the exact paths to the scripts (as arguments), so a name
+# can be changed in this block without touching any script.
+# The sample table is a TSV (its text fields contain commas): read it with quote = "" / QUOTE_NONE
+SAMPLE_DATA_FILTERED = f"{DATA}/sample_data_filtered.tsv"
 SAMPLE_ACCESSIONS = f"{DATA}/sample_accessions.txt"
 DATA_POINTS = f"{DATA}/points.csv"
 
@@ -22,6 +26,7 @@ FILTERED_BIOM = f"{DATA}/microbeatlas/otuTable_soilCurated_OTU97_nextMAPrelease_
 
 ALL_DATA_CSV = f"{RESULTS}/all_sampled_data.csv"
 
+# the flag files below are written by the analysis scripts themselves, inside the folder they are given
 DONE_1 = f"{RESULTS}/1_alpha_overview/fig1_panels.rds"
 DONE_2 = f"{RESULTS}/2_alpha_beta_elevation_latitude/.done"
 
@@ -33,64 +38,46 @@ rule all:
 
 rule analysis_step_1:
     input:
-        SAMPLE_DATA_FILTERED
+        table=SAMPLE_DATA_FILTERED
     output:
         DONE_1
     conda:
         "envs/r_analyses/environment.yml"
     params:
-        data_folder=DATA,
-        results_folder=RESULTS
+        out_folder=os.path.dirname(DONE_1)
     shell:
         """
-        Rscript scripts/1_alpha_overview.R {params.data_folder} {params.results_folder}
+        Rscript scripts/1_alpha_overview.R {input.table} {params.out_folder}
         """
 
 rule analysis_step_2:
     input:
-        SAMPLE_DATA_FILTERED,
-        ALL_DATA_CSV,
-        FILTERED_BIOM
+        table=SAMPLE_DATA_FILTERED,
+        env=ALL_DATA_CSV,
+        biom=FILTERED_BIOM
     output:
         DONE_2
     conda:
         "envs/r_analyses/environment.yml"
     params:
-        data_folder=DATA,
-        results_folder=RESULTS
+        out_folder=os.path.dirname(DONE_2)
     shell:
         """
-        Rscript scripts/2_alpha_beta_elevation_latitude.R {params.data_folder} {params.results_folder}
+        Rscript scripts/2_alpha_beta_elevation_latitude.R {input.table} {input.env} {input.biom} {params.out_folder}
         """
 
-# The R script builds the sample table. Its command line is unchanged, and the accession list is NOT an
-# output of this rule on purpose: Snakemake deletes a rule's existing outputs before it reruns it, so
-# declaring both here would delete an existing CSV before the script could reuse it.
+# The R script writes both outputs: the sample table (TSV) and the list of accessions to keep
 rule prepare_microbeatlas_data:
     output:
-        SAMPLE_DATA_FILTERED
+        table=SAMPLE_DATA_FILTERED,
+        accessions=SAMPLE_ACCESSIONS
     conda:
         "envs/microbeatlas/environment.yml"
     params:
         data_folder=DATA
     shell:
         """
-        Rscript scripts/microbeatlas_filter_data.R {params.data_folder}
-        """
-
-# One accession per line, taken from the sample table (the script only reads the CSV when it exists)
-rule sample_accessions:
-    input:
-        SAMPLE_DATA_FILTERED
-    output:
-        SAMPLE_ACCESSIONS
-    conda:
-        "envs/microbeatlas/environment.yml"
-    params:
-        data_folder=DATA
-    shell:
-        """
-        Rscript scripts/microbeatlas_filter_data.R {params.data_folder}
+        Rscript scripts/microbeatlas_filter_data.R {params.data_folder} {output.table} {output.accessions}
         """
 
 # Subset the BIOM to the filtered samples. -s takes a FILE with one ID per line (not a comma-separated
@@ -116,8 +103,8 @@ rule prepare_points:
     run:
         import pandas as pd
 
-        # needs a QUOTED csv: run microbeatlas_filter_data.R once with REWRITE_QUOTED <- TRUE if it is not
-        df = pd.read_csv(input[0])
+        # tab-separated, no quoting: text fields can contain commas and double quotes
+        df = pd.read_csv(input[0], sep="\t", quoting=csv.QUOTE_NONE, low_memory=False)
 
         points = df[["Sample_acc", "Latitude", "Longitude", "Depth_m", "Date_collected"]].copy()
         points.columns = ["site", "lat", "lon", "depth_m", "sample_date"]

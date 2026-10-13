@@ -43,11 +43,11 @@
 #   figS1_beta_jaccard.png        : Supplementary Figure 1 = same as C, D with Jaccard
 #   alpha/ and beta/              : full grids (all metrics / variables / specs), tables, diagnostics
 #
-# Input : <data_folder>/sample_data_filtered.csv, elevation from env_file and, for part B,
+# Input : <data_folder>/sample_data_filtered.tsv, elevation from env_file and, for part B,
 #         the filtered BIOM written by microbeatlas_filter_data.R
 # Output: <out_folder>/alpha/ and <out_folder>/beta/
-# Usage : Rscript 2_alpha_beta_elevation_latitude.R [data_folder] [results_folder]
-#         (Snakemake passes both from smk_config.yaml; results_folder defaults to <data_folder>/../results)
+# Usage : Rscript 2_alpha_beta_elevation_latitude.R [sample_table] [env_table] [filtered_biom] [out_folder]
+#         Snakemake passes the exact paths (all file names are defined in the Snakefile only)
 # =============================================================================
 
 suppressPackageStartupMessages({
@@ -68,20 +68,24 @@ RUN_BETA  <- TRUE    # part B (beta diversity; slow: reads the BIOM)
 TEST_MODE <- FALSE   # TRUE: tiny beta run (few samples, 1 replicate) to check that it works
 
 args <- commandArgs(trailingOnly = TRUE)
-data_folder <- if (length(args) >= 1) as.character(args[1]) else
-  "/home/renku/work/epfl-altshuler/GlobalAlpineSoilMicrobiome/data"
-results_folder <- if (length(args) >= 2) as.character(args[2]) else file.path(dirname(data_folder), "results")
-out_folder  <- file.path(results_folder, "2_alpha_beta_elevation_latitude")
+# Snakemake passes: args[1] = sample table (TSV), args[2] = all_sampled_data.csv, args[3] = filtered BIOM,
+# args[4] = output folder. The defaults are for running by hand.
+data_folder     <- "/home/renku/work/epfl-altshuler/GlobalAlpineSoilMicrobiome/data"
+results_default <- file.path(dirname(data_folder), "results")
+sample_table  <- if (length(args) >= 1) as.character(args[1]) else file.path(data_folder, "sample_data_filtered.tsv")
+env_table     <- if (length(args) >= 2) as.character(args[2]) else file.path(results_default, "all_sampled_data.csv")
+filtered_biom <- if (length(args) >= 3) as.character(args[3]) else
+  file.path(data_folder, "microbeatlas", "otuTable_soilCurated_OTU97_nextMAPrelease_filtered.biom")
+out_folder    <- if (length(args) >= 4) as.character(args[4]) else file.path(results_default, "2_alpha_beta_elevation_latitude")
 
 CFG <- list(
   # --- input ---
-  alpha_file  = file.path(data_folder, "sample_data_filtered.csv"),
-  env_file    = file.path(results_folder, "all_sampled_data.csv"),   # elevation (DEM) etc., written by download_earth_data
-  alpha_id    = "Sample_acc",   # sample ID column in sample_data_filtered.csv   (check!)
+  alpha_file  = sample_table,
+  env_file    = env_table,      # all_sampled_data.csv: elevation (DEM) etc., written by download_earth_data
+  alpha_id    = "Sample_acc",   # sample ID column in sample_data_filtered.tsv   (check!)
   env_id      = "site",         # matching ID column in env_file                  (check!)
   env_elev    = "elevation",    # elevation column (metres) in env_file           (check!)
-  biom_file   = file.path(data_folder, "microbeatlas",
-                          "otuTable_soilCurated_OTU97_nextMAPrelease_filtered.biom"),   # written by the Snakemake rule filter_biom
+  biom_file   = filtered_biom,  # written by the Snakemake rule filter_biom
   biom_id     = "Accessions",   # column of alpha_file that matches the BIOM sample IDs
   # --- part A ---
   abs_lat     = TRUE,           # TRUE: |latitude|; FALSE: signed latitude
@@ -158,54 +162,12 @@ assemble_fig <- function(file, rows, leg, caption, width, height, row_heights = 
 }
 
 ## ---- 1. Data (shared by both parts) -----------------------------------------------------------------------
-# Reads sample_data_filtered.csv even when it was written WITHOUT quotes (quote = F).
-#  * commas inside {...} are protected: everything within braces is ONE field;
-#  * rows that still have extra fields (unbraced commas in free text such as
-#    "Washington state, USA") get the extras merged back into the geo_col column;
-#  * rows that still do not fit (non-numeric coordinates, Alpine not Alpine/Lowland, too few
-#    fields) are dropped and counted.
-# A properly quoted CSV (first data line starts with a quote) is read with read.csv as usual.
-read_filtered_table <- function(path, geo_col = "GPT_Geotext") {
-  first <- readLines(path, n = 2)
-  if (length(first) >= 2 && substr(first[2], 1, 1) == "\"")
-    return(read.csv(path, stringsAsFactors = FALSE))
+# The sample table is a TSV without quoting (its text fields contain commas): read it with quote = "" so that
+# a stray double quote cannot swallow the following lines; fill = FALSE makes a misaligned row an error.
+read_sample_table <- function(path)
+  read.delim(path, quote = "", comment.char = "", stringsAsFactors = FALSE, check.names = FALSE, fill = FALSE)
 
-  lines <- readLines(path)
-  hdr <- strsplit(lines[1], ",", fixed = TRUE)[[1]]; n <- length(hdr); lines <- lines[-1]
-
-  m <- gregexpr("\\{[^{}]*\\}", lines)                       # protect commas inside {...}
-  regmatches(lines, m) <- lapply(regmatches(lines, m), function(z) gsub(",", "\001", z, fixed = TRUE))
-  parts <- strsplit(lines, ",", fixed = TRUE); rm(lines, m)
-
-  g <- match(geo_col, hdr)
-  extra_rows <- which(lengths(parts) > n)
-  if (length(extra_rows)) {
-    if (is.na(g)) stop("Rows with extra fields, but column '", geo_col, "' not found in the header")
-    parts[extra_rows] <- lapply(parts[extra_rows], function(p) {
-      e <- length(p) - n
-      rest <- if (g + e < length(p)) p[(g + e + 1):length(p)] else character(0)
-      c(p[seq_len(g - 1)], paste(p[g:(g + e)], collapse = ","), rest)
-    })
-  }
-  ok_len <- lengths(parts) == n
-  mat <- matrix(unlist(parts[ok_len], use.names = FALSE), ncol = n, byrow = TRUE); rm(parts)
-  colnames(mat) <- hdr
-
-  valid <- rep(TRUE, nrow(mat))
-  if (all(c("Latitude", "Longitude", "Alpine") %in% hdr))
-    valid <- is.finite(suppressWarnings(as.numeric(mat[, "Latitude"]))) &
-             is.finite(suppressWarnings(as.numeric(mat[, "Longitude"]))) &
-             mat[, "Alpine"] %in% c("Alpine", "Lowland")
-  message(sprintf("%s: %d lines | %d with extra fields merged into %s | %d with too few fields | %d invalid rows dropped",
-                  basename(path), length(ok_len), length(extra_rows), geo_col, sum(!ok_len), sum(!valid)))
-  mat <- mat[valid, , drop = FALSE]
-
-  df <- as.data.frame(mat, stringsAsFactors = FALSE)
-  df[] <- lapply(df, function(x) type.convert(gsub("\001", ",", x, fixed = TRUE), as.is = TRUE))
-  df
-}
-
-raw <- read_filtered_table(CFG$alpha_file)
+raw <- read_sample_table(CFG$alpha_file)
 required <- c("Longitude", "Latitude", "Alpine", "alpha_total_n_reads",
               "alpha_n_otus", "alpha_shannon", "alpha_pielou", CFG$alpha_id,
               "unmapped_raw_counts", "total_raw_counts",
