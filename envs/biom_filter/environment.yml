@@ -1,0 +1,9 @@
+name: biom_filter
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - python>=3.10
+  - biom-format      # provides the `biom` command (biom subset-table)
+  - h5py             # HDF5 BIOM files
