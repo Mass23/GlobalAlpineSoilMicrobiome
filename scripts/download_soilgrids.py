@@ -40,8 +40,8 @@ from soilgrids import SoilGrids
 # --------------------------------------------------------------------------- settings
 import sys
 
-POINTS_CSV = sys.argv[1]
-OUT_CSV = sys.argv[2]
+POINTS_CSV = Path(sys.argv[1])
+OUT_CSV = Path(sys.argv[2])
 
 PROJECT_DIR = Path("/home/renku/work/epfl-altshuler/GlobalAlpineSoilMicrobiome")
 #POINTS_CSV = PROJECT_DIR / "data/points.csv"

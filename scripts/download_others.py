@@ -58,8 +58,8 @@ import planetary_computer
 # --------------------------------------------------------------------------- settings
 import sys
 
-POINTS_CSV = sys.argv[1]
-OUT_CSV = sys.argv[2]
+POINTS_CSV = Path(sys.argv[1])
+OUT_CSV = Path(sys.argv[2])
 #POINTS_CSV = Path("/home/renku/work/GlobalAlpineSoilMicrobiome/data/points.csv")
 #OUT_CSV = Path("/home/renku/work/GlobalAlpineSoilMicrobiome/data/other_data.csv")
 TMP_DIR = Path("/home/renku/work/epfl-altshuler/GlobalAlpineSoilMicrobiome/tmp")
