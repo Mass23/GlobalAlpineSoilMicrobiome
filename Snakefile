@@ -126,6 +126,9 @@ rule download_chelsa:
         python3 scripts/download_chelsa.py {input} {output}
         """
 
+# soil_properties (optional, in smk_config.yaml): the SoilGrids properties to fetch, e.g.
+#   soil_properties: [phh2o, soc, nitrogen, clay, sand, silt, cec, bdod]
+# Each property costs 3 requests per coordinate, so fewer properties = a much shorter run. Empty / absent = all 13.
 rule download_soilgrids:
     input:
         DATA_POINTS
@@ -133,9 +136,11 @@ rule download_soilgrids:
         SOIL_CSV
     conda:
         "envs/soilgrids/environment.yml"
+    params:
+        properties=",".join(config.get("soil_properties", []))
     shell:
         """
-        python3 scripts/download_soilgrids.py {input} {output}
+        python3 scripts/download_soilgrids.py {input} {output} "{params.properties}"
         """
 
 rule download_other_data:

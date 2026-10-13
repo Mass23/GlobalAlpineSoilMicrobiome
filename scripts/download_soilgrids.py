@@ -2,8 +2,15 @@
 """
 SoilGrids 2.0 soil properties at sampling points.
 
-Run     python3 download_soilgrids.py [points.csv soilgrids_data.csv]   (Snakemake passes the two paths;
-        the tmp/ cache is written next to the output)
+Run     python3 download_soilgrids.py [points.csv soilgrids_data.csv [properties]]
+        Snakemake passes the two paths; the tmp/ cache is written next to the output. `properties` is an
+        optional comma-separated list (e.g. phh2o,soc,nitrogen,clay,sand,silt,cec,bdod); empty = all.
+        SOILGRIDS_WORKERS (environment variable) sets the number of parallel requests (default 4).
+
+Speed: one WCS request per coordinate x property x layer is the whole cost (about 2.6 requests/s with 4
+workers). Only the layers the output needs are requested: the top three (0-5, 5-15, 15-30 cm) for every
+coordinate, plus a deeper layer only where a sample's depth_cm falls in it. Choosing fewer properties is
+the other big lever (each property = 3 requests per coordinate); the log shows the speed and an ETA.
 Reads   points.csv                   columns lat, lon, depth_cm (may be empty); others kept
 Writes  soilgrids_data.csv           points + two sets of columns per property:
           <prop>_30cm_avg   thickness-weighted mean of 0-5, 5-15, 15-30 cm (5:10:15)
@@ -35,6 +42,7 @@ and open results with rioxarray/pyproj, which needs PROJ's database.
 # no `from __future__` import: keeps the file usable with Snakemake's `script:` preamble too
 import json
 import logging
+import os
 import re
 import sys
 import time
@@ -62,13 +70,19 @@ PROPERTIES = {
     "nitrogen": 100, "phh2o": 10, "soc": 10, "ocd": 10,
     "wv0010": 10, "wv0033": 10, "wv1500": 10,
 }
+if len(sys.argv) >= 4 and sys.argv[3].strip():        # optional 3rd argument: which properties to fetch
+    _wanted = [p.strip() for p in sys.argv[3].split(",") if p.strip()]
+    _unknown = [p for p in _wanted if p not in PROPERTIES]
+    if _unknown:
+        raise SystemExit(f"unknown SoilGrids property/properties {_unknown}; known: {sorted(PROPERTIES)}")
+    PROPERTIES = {p: PROPERTIES[p] for p in _wanted}
 OCS_FACTOR = 10                                     # ocs: t/ha -> kg/m2, 0-30 cm only
 LAYERS = [(0, 5), (5, 15), (15, 30), (30, 60), (60, 100), (100, 200)]
 TOP30 = LAYERS[:3]
 STAT = "mean"
 
 HALF_WIDTH_DEG = 0.003375                           # 3 x 3 tile of ~0.00225 deg (~250 m) pixels
-N_WORKERS = 4                                       # parallel requests; keep modest for ISRIC
+N_WORKERS = int(os.environ.get("SOILGRIDS_WORKERS", 4))   # parallel requests; keep modest for ISRIC
 TRIES = 3                                           # for network / server trouble only (see docstring)
 MAX_REFUSED_FRACTION = 0.05                         # more refused coordinates than this = suspect, exit 1
 RETRY_REFUSED = False                               # True: ask again for coordinates refused in an earlier run
@@ -228,11 +242,24 @@ def main() -> int:
     log.info("%d points, %d unique coordinates, %d with a depth", len(df), len(coords),
              int(np.isfinite(depth).sum()))
 
-    jobs = [(p, coverage_id(p, t, b)) for p in PROPERTIES for t, b in LAYERS]
-    jobs.append(("ocs", "ocs_0-30cm_mean"))
+    # layers needed per coordinate: the top 30 cm (for <prop>_30cm_avg) and, only where a sample has a depth_cm,
+    # the layer containing it (for <prop>_depth_val). The other layers would never reach the output.
+    layers_needed = {}
+    for i in range(len(df)):
+        ck = coord_key(lon[i], lat[i])
+        layers = layers_needed.setdefault(ck, set(TOP30))
+        layer = layer_for(depth[i])
+        if layer:
+            layers.add(layer)
     cache = Cache(CACHE_JSONL)
-    todo = [(p, cov, ck) for p, cov in jobs for ck in coords if (cov, ck) not in cache.data]
-    log.info("%d requests needed (%d cached)", len(todo), len(jobs) * len(coords) - len(todo))
+    todo, needed = [], 0
+    for ck, layers in layers_needed.items():
+        wanted = [(p, coverage_id(p, t, b)) for p in PROPERTIES for t, b in sorted(layers)]
+        wanted.append(("ocs", "ocs_0-30cm_mean"))
+        needed += len(wanted)
+        todo += [(p, cov, ck) for p, cov in wanted if (cov, ck) not in cache.data]
+    log.info("%d requests needed (%d cached) for %d properties: %s", len(todo), needed - len(todo),
+             len(PROPERTIES), ",".join(PROPERTIES))
 
     services, failed, unavailable = Services(), {}, set()
     with rasterio.Env(), ThreadPoolExecutor(N_WORKERS) as pool:
@@ -250,6 +277,7 @@ def main() -> int:
                 continue
             lo, la = map(float, ck.split(","))
             futures[pool.submit(fetch, services, p, cov, lo, la)] = (cov, ck)
+        t0 = time.monotonic()
         for i, fut in enumerate(as_completed(futures), 1):
             cov, ck = futures[fut]
             try:
@@ -260,7 +288,9 @@ def main() -> int:
                 failed[(cov, ck)] = str(e)
                 log.error("FAILED %s at %s: %s", cov, ck, str(e)[:200])
             if i % 100 == 0 or i == len(futures):
-                log.info("  %d/%d requests done", i, len(futures))
+                rate = i / max(time.monotonic() - t0, 1e-9)
+                log.info("  %d/%d requests done (%.1f/s, about %.1f h left)", i, len(futures), rate,
+                         (len(futures) - i) / rate / 3600)
     if unavailable:
         log.warning("not offered by the WCS (left empty): %s", ", ".join(sorted(unavailable)))
 
