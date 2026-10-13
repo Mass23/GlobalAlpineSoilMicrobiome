@@ -2,6 +2,11 @@
 # folder containing proj.db BEFORE loading sf/terra (find it with: find $CONDA_PREFIX -name proj.db):
 # Sys.setenv(PROJ_DATA = "/path/to/folder/with/proj.db", PROJ_LIB = "/path/to/folder/with/proj.db")
 
+# The input BIOM is HDF5 and is only read: switch HDF5 file locking off, so a second R process (or a
+# crashed one) holding a lock cannot make read_biom() fail with "unable to lock file, errno = 11".
+# Set BEFORE the packages are loaded. Do NOT run two copies of this script at the same time.
+Sys.setenv(HDF5_USE_FILE_LOCKING = "FALSE")
+
 library(dplyr)
 library(ggplot2)
 library(purrr)
@@ -17,7 +22,7 @@ library(phyloseq)
 library(geosphere)
 library(slam)
 
-message(">>> microbeatlas_filter_data.R v2026-10-08b (resume: skip to BIOM if CSV exists) <<<")
+message(">>> microbeatlas_filter_data.R v2026-10-13b (resume: CSV read with the brace-aware loader) <<<")
 args <- commandArgs(trailingOnly = TRUE)
 # Snakemake passes the data folder as the first argument; fall back to the default path when run by hand
 data_folder = if (length(args) >= 1) as.character(args[1]) else "/home/renku/work/epfl-altshuler/GlobalAlpineSoilMicrobiome/data"
@@ -34,7 +39,7 @@ N_TEST    <- 100
 # FALSE (default): if the filtered CSV already exists, skip the metadata/land/alpine/alpha
 #                  steps and only load + filter + write the BIOM (or do nothing if both exist).
 # TRUE: ignore existing outputs and redo everything.
-FORCE_RERUN <- TRUE
+FORCE_RERUN <- FALSE
 
 # ---- Output paths ----
 suffix   <- if (TEST_MODE) "_TEST" else ""
@@ -42,6 +47,53 @@ csv_out  <- paste0('/home/renku/work/epfl-altshuler/GlobalAlpineSoilMicrobiome/d
 biom_out <- paste0('/home/renku/work/epfl-altshuler/GlobalAlpineSoilMicrobiome/data/microbeatlas/samples-otus.97.mapped.metag.minfilter.refilt_filtered', suffix, '.biom')
 
 # ---- Helper functions ----
+
+# Reads sample_data_filtered.csv even when it was written WITHOUT quotes (quote = F).
+#  * commas inside {...} are protected: everything within braces is ONE field;
+#  * rows that still have extra fields (unbraced commas in free text such as
+#    "Washington state, USA") get the extras merged back into the geo_col column;
+#  * rows that still do not fit (non-numeric coordinates, Alpine not Alpine/Lowland, too few
+#    fields) are dropped and counted.
+# A properly quoted CSV (first data line starts with a quote) is read with read.csv as usual.
+read_filtered_table <- function(path, geo_col = "GPT_Geotext") {
+  first <- readLines(path, n = 2)
+  if (length(first) >= 2 && substr(first[2], 1, 1) == "\"")
+    return(read.csv(path, stringsAsFactors = FALSE))
+  
+  lines <- readLines(path)
+  hdr <- strsplit(lines[1], ",", fixed = TRUE)[[1]]; n <- length(hdr); lines <- lines[-1]
+  
+  m <- gregexpr("\\{[^{}]*\\}", lines)                       # protect commas inside {...}
+  regmatches(lines, m) <- lapply(regmatches(lines, m), function(z) gsub(",", "\001", z, fixed = TRUE))
+  parts <- strsplit(lines, ",", fixed = TRUE); rm(lines, m)
+  
+  g <- match(geo_col, hdr)
+  extra_rows <- which(lengths(parts) > n)
+  if (length(extra_rows)) {
+    if (is.na(g)) stop("Rows with extra fields, but column '", geo_col, "' not found in the header")
+    parts[extra_rows] <- lapply(parts[extra_rows], function(p) {
+      e <- length(p) - n
+      rest <- if (g + e < length(p)) p[(g + e + 1):length(p)] else character(0)
+      c(p[seq_len(g - 1)], paste(p[g:(g + e)], collapse = ","), rest)
+    })
+  }
+  ok_len <- lengths(parts) == n
+  mat <- matrix(unlist(parts[ok_len], use.names = FALSE), ncol = n, byrow = TRUE); rm(parts)
+  colnames(mat) <- hdr
+  
+  valid <- rep(TRUE, nrow(mat))
+  if (all(c("Latitude", "Longitude", "Alpine") %in% hdr))
+    valid <- is.finite(suppressWarnings(as.numeric(mat[, "Latitude"]))) &
+    is.finite(suppressWarnings(as.numeric(mat[, "Longitude"]))) &
+    mat[, "Alpine"] %in% c("Alpine", "Lowland")
+  message(sprintf("%s: %d lines | %d with extra fields merged into %s | %d with too few fields | %d invalid rows dropped",
+                  basename(path), length(ok_len), length(extra_rows), geo_col, sum(!ok_len), sum(!valid)))
+  mat <- mat[valid, , drop = FALSE]
+  
+  df <- as.data.frame(mat, stringsAsFactors = FALSE)
+  df[] <- lapply(df, function(x) type.convert(gsub("\001", ",", x, fixed = TRUE), as.is = TRUE))
+  df
+}
 
 # Write the BIOM to a temp file, then rename, so a crash mid-write can't leave a
 # truncated .biom that would later be mistaken for a finished one.
@@ -130,7 +182,14 @@ if (!FORCE_RERUN && file.exists(csv_out) && file.exists(biom_out)) {
   message(csv_out, " already exists: skipping metadata/land/alpine/alpha steps, ",
           "only filtering the BIOM.")
   
-  acc <- data.table::fread(csv_out, select = "Accessions")$Accessions
+  # The CSV was written with quote = F (commas inside text fields): read it with the same brace-aware
+  # parser as scripts 1 and 2, so the filtered BIOM keeps exactly the samples those scripts will use.
+  csv_tab <- read_filtered_table(csv_out)
+  stopifnot("column 'Accessions' not found in the CSV" = "Accessions" %in% names(csv_tab))
+  acc <- unique(csv_tab$Accessions)
+  message(nrow(csv_tab), " CSV rows, ", length(acc), " unique accessions")
+  stopifnot("no accession could be read from the CSV" = length(acc) > 0)
+  rm(csv_tab)
   
   biom_file <- read_biom(biom_path)
   stopifnot("some accessions in the CSV are missing from the BIOM" = all(acc %in% biom_file$samples))
@@ -277,6 +336,7 @@ if (!FORCE_RERUN && file.exists(csv_out) && file.exists(biom_out)) {
   biom_filtered = biom_filtered[sample_env_filtered_alpha$Accessions]
   
   # CSV first, then BIOM: if the BIOM step crashes, the next run takes the fast path
+  # (quote = F kept as in your version: scripts 1 and 2 read this file with read_filtered_table())
   write.csv(sample_env_filtered_alpha, file = csv_out, quote = F, row.names = F)
   write_biom_safe(biom_filtered, biom_out)
   message("Wrote ", csv_out, " and ", biom_out)

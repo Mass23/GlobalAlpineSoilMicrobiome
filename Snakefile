@@ -6,12 +6,23 @@ OTHER_CSV = '/home/renku/work/GlobalAlpineSoilMicrobiome/data/other_data.csv'
 
 ALL_DATA_CSV  = '/home/renku/work/GlobalAlpineSoilMicrobiome/results/all_sampled_data.csv'
 
-SAMPLE_DATA_FILTERED = 'data/sample_data_filtered.csv'
-DATA_POINTS = 'data/points.csv'
+SAMPLE_DATA_FILTERED = '/home/renku/work/GlobalAlpineSoilMicrobiome/data/sample_data_filtered.csv'
+DATA_POINTS = '/home/renku/work/GlobalAlpineSoilMicrobiome/data/points.csv'
+
+DONE_1 = '/home/renku/work/GlobalAlpineSoilMicrobiome/results/1_alpha_overview/fig1_panels.rds'
 
 rule all:
     input:
+        DONE_1
+        
+
+rule analysis_step_1:
+    input:
         ALL_DATA_CSV
+    output:
+        DONE_1
+    conda:
+        "envs/r_analyses/environment.yml"
 
 rule prepare_microbeatlas_data:
     output:
