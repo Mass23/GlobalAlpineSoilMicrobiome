@@ -41,6 +41,9 @@ CFG <- list(
   depth_xmax  = 5e5,            # panel B: x axis is cut here (reads)
   log_y       = TRUE,           # panel B: log10 y axis for observed OTUs
   k_space     = 60,             # basis dimension of the sos spatial spline
+  k_smooth    = 5,              # basis dimension of every 1-D smooth: small = smooth curves
+  bs_smooth   = "ts",           # thin plate spline WITH shrinkage (the null space is penalised too)
+  select      = FALSE,          # TRUE would add a second shrinkage penalty on top of "ts"
   n_plot_lowland = 20000,       # lowland points drawn behind the GAM curves (plot only)
   fig_width   = 13,             # inches
   row_heights = c(6, 4.2, 3.8), # inches: map | B, C | D, E
@@ -121,16 +124,18 @@ resp_lab <- c(richness = "Observed OTUs", shannon = "Shannon index")
 
 # Lowland = reference level: the by-smooths (ordered factor) are alpine MINUS lowland, so their
 # p-values test whether the alpine curve differs in shape from the lowland one
-base_rhs <- sprintf(paste("Alpine + s(log10_reads, k = 8) + s(log10_reads, by = AlpineO, k = 8)",
-                          "+ s(lat, lon, bs = 'sos', k = %d)"), CFG$k_space)
+sm1 <- function(v, by = NULL) sprintf("s(%s, bs = '%s', k = %d%s)", v, CFG$bs_smooth, CFG$k_smooth,
+                                      if (is.null(by)) "" else paste0(", by = ", by))
+base_rhs <- paste("Alpine +", sm1("log10_reads"), "+", sm1("log10_reads", "AlpineO"),
+                  sprintf("+ s(lat, lon, bs = 'sos', k = %d)", CFG$k_space))
 rhs_u <- c(m0  = base_rhs,                                                    # space + depth
-           m1  = paste(base_rhs, "+ s(unmapped_prop, k = 6)"),                # + unmapped (common)
-           m1g = paste(base_rhs, "+ s(unmapped_prop, k = 6)",                 # + unmapped (per group)
-                       "+ s(unmapped_prop, by = AlpineO, k = 6)"))
+           m1  = paste(base_rhs, "+", sm1("unmapped_prop")),                  # + unmapped (common)
+           m1g = paste(base_rhs, "+", sm1("unmapped_prop"),                   # + unmapped (per group)
+                       "+", sm1("unmapped_prop", "AlpineO")))
 
 fit_gam <- function(resp, rhs)
   bam(as.formula(paste(resp, "~", rhs)), data = dm, family = fam[[resp]],
-      method = "fREML", discrete = TRUE, select = TRUE, nthreads = CFG$nthreads)
+      method = "fREML", discrete = TRUE, select = CFG$select, nthreads = CFG$nthreads)
 
 fits_u <- list()
 for (resp in names(fam)) for (mm in names(rhs_u)) {
@@ -165,7 +170,7 @@ grid_depth <- bind_rows(lapply(levels(dm$Alpine), function(a) {
 }))
 grid_depth$lat <- median(dm$lat); grid_depth$lon <- median(dm$lon)    # spatial term is excluded
 pr <- predict(m0, grid_depth, type = "link", se.fit = TRUE, exclude = "s(lat,lon)",
-              newdata.guaranteed = TRUE)
+              newdata.guaranteed = TRUE, discrete = FALSE)
 li <- family(m0)$linkinv
 grid_depth$reads <- 10^grid_depth$log10_reads
 grid_depth$fit <- li(pr$fit)
@@ -247,7 +252,7 @@ pred_unm <- function(resp) {
                      AlpineO = factor(a, levels = levels(dm$Alpine), ordered = TRUE),
                      unmapped_prop = seq(quantile(x, .01), quantile(x, .99), length.out = 100),
                      log10_reads = median(dm$log10_reads), lat = median(dm$lat), lon = median(dm$lon))
-    p <- predict(m, nd, type = "link", se.fit = TRUE, exclude = "s(lat,lon)", newdata.guaranteed = TRUE)
+    p <- predict(m, nd, type = "link", se.fit = TRUE, exclude = "s(lat,lon)", newdata.guaranteed = TRUE, discrete = FALSE)
     li <- family(m)$linkinv
     data.frame(response = resp_lab[[resp]], Alpine = nd$Alpine, x = nd$unmapped_prop,
                fit = li(p$fit), lo = li(p$fit - 1.96 * p$se.fit), hi = li(p$fit + 1.96 * p$se.fit))

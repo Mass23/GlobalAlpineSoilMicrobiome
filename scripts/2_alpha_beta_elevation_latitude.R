@@ -106,7 +106,11 @@ CFG <- list(
   rare_depth  = 1000,           # rarefaction depth for Jaccard (samples below are dropped)
   n_pairs     = 1000,           # random pairwise distances per comparison type, replicate and pair set
   min_pairs   = 100,            # comparison types with fewer pairs are dropped from a model
-  k_beta      = 6,              # basis dimension of the pair smooths
+  k_smooth    = 5,              # basis dimension of every 1-D smooth (alpha and beta models): small = smooth curves
+  bs_smooth   = "ts",           # thin plate spline WITH shrinkage (the null space is penalised too)
+  select      = FALSE,          # TRUE would add a second shrinkage penalty on top of "ts"
+  beta_points = "all",          # beta panels: "all" = every pair of every replicate as a point; "binned" = 15 binned means per group
+  beta_point_alpha = 0.08,      # transparency of those points
   # --- main figure ---
   main_alpha_metrics = c("richness", "shannon", "pielou"),   # alpha metrics shown in panels A, B
   main_beta_spec     = "all_pairs",                          # pair set shown in panels C, D
@@ -237,10 +241,11 @@ families <- list(richness = nb(), shannon = Gamma(link = "log"), pielou = betar(
 resp_lab <- c(richness = "Observed OTUs", shannon = "Shannon index", pielou = "Pielou J",
               unmapped = "Unmapped reads (proportion)")
 
-base_rhs <- paste("Alpine + s(log10_reads, k = 6)",
-                  "+ s(elevation, k = 6) + s(elevation, by = AlpineO, k = 6)",
-                  "+ s(glat, k = 6) + s(glat, by = AlpineO, k = 6)")
-unm_rhs   <- "+ s(unmapped_prop, k = 6) + s(unmapped_prop, by = AlpineO, k = 6)"   # curves differ by group (script 1)
+sm1 <- function(v, by = NULL) sprintf("s(%s, bs = '%s', k = %d%s)", v, CFG$bs_smooth, CFG$k_smooth,
+                                      if (is.null(by)) "" else paste0(", by = ", by))
+base_rhs <- paste("Alpine +", sm1("log10_reads"), "+", sm1("elevation"), "+", sm1("elevation", "AlpineO"),
+                  "+", sm1("glat"), "+", sm1("glat", "AlpineO"))
+unm_rhs   <- paste("+", sm1("unmapped_prop"), "+", sm1("unmapped_prop", "AlpineO"))   # curves differ by group (script 1)
 space_rhs <- sprintf("+ s(lat, lon, bs = 'sos', k = %d)", CFG$k_space)
 specs <- c(net       = paste(base_rhs, unm_rhs, space_rhs),   # MAIN
            raw       = paste(base_rhs, unm_rhs),              # no spatial term
@@ -269,7 +274,7 @@ for (resp in names(families)) {
     } else {
       message("Fitting ", nm)
       fits[[nm]] <- bam(as.formula(paste(resp, "~", spec_formula(resp, sp))), data = d, family = families[[resp]],
-                        method = "fREML", discrete = TRUE, select = TRUE, nthreads = CFG$nthreads)
+                        method = "fREML", discrete = TRUE, select = CFG$select, nthreads = CFG$nthreads)
     }
   }
 }
@@ -436,14 +441,15 @@ assemble_fig(file.path(out_folder, "figS2_unmapped_gradients.png"), list(list(pS
 # Where is the reference database less complete? One spatial spline (sos) for the lowland samples and
 # an alpine-specific one (difference surface), for the unmapped proportion at the median sequencing depth.
 # No elevation / latitude terms here: the surface is the regional pattern itself.
+m_sp_formula <- as.formula(sprintf(paste("unmapped ~ Alpine + %s + s(lat, lon, bs = 'sos', k = %d)",
+                                           "+ s(lat, lon, bs = 'sos', by = AlpineO, k = %d)"),
+                                     sm1("log10_reads"), CFG$k_space, CFG$k_space_alpine))
+strip_f <- function(f) gsub("\\s+", "", paste(deparse(f), collapse = ""))
 m_sp_file <- out_a("figS3_model.rds")
 m_sp <- if (REUSE_FITS && file.exists(m_sp_file)) readRDS(m_sp_file) else NULL
-if (is.null(m_sp) || length(m_sp$y) != nrow(d)) {
-  m_sp <- bam(as.formula(sprintf(paste("unmapped ~ Alpine + s(log10_reads, k = 6) + s(lat, lon, bs = 'sos', k = %d)",
-                                       "+ s(lat, lon, bs = 'sos', by = AlpineO, k = %d)"),
-                                 CFG$k_space, CFG$k_space_alpine)),
-              data = d, family = betar(link = "logit"), method = "fREML", discrete = TRUE,
-              select = TRUE, nthreads = CFG$nthreads)
+if (is.null(m_sp) || length(m_sp$y) != nrow(d) || !identical(strip_f(formula(m_sp)), strip_f(m_sp_formula))) {
+  m_sp <- bam(m_sp_formula, data = d, family = betar(link = "logit"), method = "fREML", discrete = TRUE,
+              select = CFG$select, nthreads = CFG$nthreads)
   saveRDS(m_sp, m_sp_file)
 } else message("Reusing saved model for Supplementary Figure 3")
 writeLines(capture.output(print(summary(m_sp))), out_a("figS3_spatial_model_summary.txt"))
@@ -655,14 +661,13 @@ prep_pairs <- function(P, spec) {
 
 fit_beta <- function(P, metric) {
   n <- nrow(P); P$y <- (P[[metric]] * (n - 1) + 0.5) / n          # squeeze into (0, 1)
-  sm <- unlist(lapply(names(beta_vars), function(v)
-    c(sprintf("s(%s, k = %d)", v, CFG$k_beta), sprintf("s(%s, by = groupO, k = %d)", v, CFG$k_beta))))
+  sm <- unlist(lapply(names(beta_vars), function(v) c(sm1(v), sm1(v, "groupO"))))
   # nuisance covariates shared by the three comparison types: differences in depth and unmapped proportion
-  terms <- c("group", sprintf("s(d_depth, k = %d)", CFG$k_beta), sprintf("s(d_unm, k = %d)", CFG$k_beta), sm)
+  terms <- c("group", sm1("d_depth"), sm1("d_unm"), sm)
   if (nlevels(P$rep_id) > 1) terms <- c(terms, "s(rep_id, bs = 're')")                  # random intercept: replicate
   bam(as.formula(paste("y ~", paste(terms, collapse = " + "))), data = P,
       family = betar(link = "logit"), method = "fREML", discrete = TRUE,
-      select = TRUE, nthreads = CFG$nthreads)
+      select = CFG$select, nthreads = CFG$nthreads)
 }
 
 # Partial curve of one pair variable per group (others at group medians), from the pooled model: the replicate
@@ -713,10 +718,11 @@ if (is.null(P_all)) {
   saveRDS(list(key = pairs_key, pairs = P_all), pairs_file)
 }
 
-preds <- list(); obs <- list(); summ <- list(); pair_counts <- list()
+preds <- list(); obs <- list(); summ <- list(); pair_counts <- list(); beta_raw <- list()
 for (spec in names(beta_specs)) {
   P <- prep_pairs(P_all, spec)
   pair_counts[[spec]] <- P %>% count(rep_id, group) %>% mutate(spec = spec)
+  beta_raw[[spec]] <- P[, c("group", names(beta_vars), names(beta_metrics))]      # every pair of every replicate (for the plots)
   message(sprintf("%s: %d pairs from %d replicates", spec, nrow(P), nlevels(P$rep_id)))
   for (metric in names(beta_metrics)) {
     message("  fitting ", spec, " / ", metric, " (pooled, random effect: replicate)")
@@ -761,10 +767,15 @@ write.csv(preds, out_b("predicted_curves.csv"), row.names = FALSE)
 
 ## ---- B4. Beta-diversity figures ----------------------------------------------------------------------------------------
 # One panel: one metric against one pair variable (line = pooled model, ribbon = its 95% confidence interval,
-# points = binned observed means of all replicates)
+# points = every pair of every replicate, or binned means if CFG$beta_points = "binned")
+pt_size  <- if (CFG$beta_points == "all") 0.35 else 0.9
+pt_alpha <- if (CFG$beta_points == "all") CFG$beta_point_alpha else 0.6
+pts_txt  <- if (CFG$beta_points == "all") "points = every pair of every replicate (transparent)" else "points = binned observed means"
 beta_panel <- function(mt, vv, sp, tag) {
   sel_rows <- function(d) d[d$spec == sp & d$metric == mt & d$variable == vv, ]
-  pm <- sel_rows(preds); ob <- sel_rows(obs)
+  pm <- sel_rows(preds)
+  ob <- if (CFG$beta_points == "all") { raw <- beta_raw[[sp]]; data.frame(group = raw$group, x = raw[[vv]], y = raw[[mt]]) }
+        else sel_rows(obs)
   pm$mid <- pm$fit
   for (nm in c("ob", "pm")) {
     d <- get(nm); d$group <- factor(d$group, levels = beta_groups); assign(nm, d)
@@ -773,7 +784,7 @@ beta_panel <- function(mt, vv, sp, tag) {
   an <- data.frame(label = beta_label(tt))
   ggplot() +
     geom_ribbon(data = pm, aes(x, ymin = lo, ymax = hi, fill = group), alpha = 0.25) +
-    geom_point(data = ob, aes(x, y, colour = group), size = 0.9, alpha = 0.6, shape = 16) +
+    geom_point(data = ob, aes(x, y, colour = group), size = pt_size, alpha = pt_alpha, shape = 16) +
     geom_line(data = pm, aes(x, mid, colour = group), linewidth = 1.2) +
     geom_text(data = an, aes(label = label), x = -Inf, y = Inf, hjust = 0, vjust = 1.3,
               size = 3, lineheight = 0.95, inherit.aes = FALSE) +
@@ -786,7 +797,12 @@ beta_panel <- function(mt, vv, sp, tag) {
 
 # Full grids (all metrics x all pair variables, one file per pair set), kept in beta/
 for (sp in names(beta_specs)) {
-  pr <- preds %>% filter(spec == sp); ob <- obs %>% filter(spec == sp)
+  pr <- preds %>% filter(spec == sp)
+  ob <- if (CFG$beta_points == "all") {
+    raw <- beta_raw[[sp]]
+    bind_rows(lapply(names(beta_metrics), function(mt) bind_rows(lapply(names(beta_vars), function(v)
+      data.frame(metric = mt, variable = v, group = raw$group, x = raw[[v]], y = raw[[mt]])))))
+  } else obs %>% filter(spec == sp)
   if (!nrow(pr)) next
   lab <- function(d) {
     d$metric   <- factor(beta_metrics[d$metric], levels = beta_metrics)
@@ -802,7 +818,7 @@ for (sp in names(beta_specs)) {
   ann_g$variable <- factor(beta_vars[ann_g$variable], levels = beta_vars)
   g <- ggplot() +
     geom_ribbon(data = pm, aes(x, ymin = lo, ymax = hi, fill = group), alpha = 0.25) +
-    geom_point(data = ob, aes(x, y, colour = group), size = 0.9, alpha = 0.6, shape = 16) +
+    geom_point(data = ob, aes(x, y, colour = group), size = pt_size, alpha = pt_alpha, shape = 16) +
     geom_line(data = pm, aes(x, mid, colour = group), linewidth = 1.2) +
     geom_text(data = ann_g, aes(label = label), x = -Inf, y = Inf, hjust = 0, vjust = 1.3,
               size = 3, lineheight = 0.95, inherit.aes = FALSE) +
@@ -827,6 +843,7 @@ beta_caption <- sprintf(paste(
   "the stars (p of the difference smooths vs the within-lowland curve: *** p < 0.001, ** p < 0.01, * p < 0.05, ns) are descriptive",
   "and optimistic."),
   beta_specs[[CFG$main_beta_spec]], CFG$n_rep, CFG$n_per_group, CFG$n_pairs)
+beta_caption <- sub("points = binned observed means", pts_txt, beta_caption, fixed = TRUE)
 
 # Supplementary Figure 1: Jaccard (rarefied presence/absence)
 pS1A <- beta_panel("jaccard", "d_elev", CFG$main_beta_spec, "A")
@@ -852,6 +869,7 @@ if (RUN_ALPHA && RUN_BETA) {
             CFG$n_pairs),
     "Stars in C, D: p of the difference smooths vs within lowland (descriptive and optimistic: pairs reuse samples).",
     "Jaccard: Supplementary Figure 1.")
+  main_caption <- sub("points = binned observed means", pts_txt, main_caption, fixed = TRUE)
   assemble_fig(file.path(out_folder, "fig2_alpha_beta_gradients.png"),
                list(list(pA, pB), list(pC, pD)), list(get_legend(pA), get_legend(pC)), main_caption,
                width = 14, height = 10.5, row_heights = c(1.1, 1))
