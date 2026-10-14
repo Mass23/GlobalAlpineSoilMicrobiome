@@ -66,6 +66,7 @@ suppressPackageStartupMessages({
 RUN_ALPHA <- TRUE    # part A (alpha diversity GAMs)
 RUN_BETA  <- TRUE    # part B (beta diversity; slow: reads the BIOM)
 TEST_MODE <- FALSE   # TRUE: tiny beta run (few samples, 1 replicate) to check that it works
+REUSE_FITS <- TRUE   # reuse the saved alpha models (alpha/fits.rds, alpha/figS3_model.rds) if they match the data and formulas
 
 args <- commandArgs(trailingOnly = TRUE)
 # Snakemake passes: args[1] = sample table (TSV), args[2] = all_sampled_data.csv, args[3] = filtered BIOM,
@@ -142,10 +143,14 @@ get_legend <- function(p) {
 # Assemble rows of 2 panels + a shared legend + a caption into one PNG
 assemble_fig <- function(file, rows, leg, caption, width, height, row_heights = rep(1, length(rows))) {
   nr <- length(rows)
+  cap_lines <- strwrap(caption, 160)
   png(file, width = width, height = height, units = "in", res = 300)
   grid.newpage()
+  # the plot rows share what is left; the legend and caption rows have an absolute height (the caption's depends
+  # on its number of lines), so they can neither overlap each other nor be cut off
   pushViewport(viewport(layout = grid.layout(nr + 2, 2,
-                        heights = unit(c(row_heights, 0.09, 0.14), "null"))))
+                        heights = unit.c(unit(row_heights, "null"), unit(0.5, "in"),
+                                         unit(0.17 * length(cap_lines) + 0.2, "in")))))
   for (i in seq_len(nr)) for (j in seq_along(rows[[i]]))
     print(rows[[i]][[j]], vp = viewport(layout.pos.row = i,
                                         layout.pos.col = if (length(rows[[i]]) == 1) 1:2 else j))
@@ -157,7 +162,7 @@ assemble_fig <- function(file, rows, leg, caption, width, height, row_heights = 
     }
   }
   pushViewport(viewport(layout.pos.row = nr + 2, layout.pos.col = 1:2))
-  grid.text(paste(strwrap(caption, 160), collapse = "\n"), x = 0.01, just = "left", gp = gpar(fontsize = 9))
+  grid.text(paste(cap_lines, collapse = "\n"), x = 0.01, just = "left", gp = gpar(fontsize = 9))
   popViewport(); dev.off()
 }
 
@@ -244,16 +249,28 @@ spec_lab <- c(net = "Net of space (sos)", raw = "No spatial term",
 specs_unm <- c(net = paste(base_rhs, space_rhs), raw = base_rhs)
 spec_formula <- function(resp, sp) if (resp == "unmapped") specs_unm[[sp]] else specs[[sp]]
 
+# a saved model is reused only if it has the same number of observations and the same formula as now
+fits_file <- out_a("fits.rds")
+same_model <- function(m, resp, sp) {
+  strip <- function(f) gsub("\\s+", "", paste(deparse(f), collapse = ""))
+  !is.null(m) && length(m$y) == nrow(d) && identical(strip(formula(m)), strip(as.formula(paste(resp, "~", spec_formula(resp, sp)))))
+}
+old_fits <- if (REUSE_FITS && file.exists(fits_file)) readRDS(fits_file) else list()
 fits <- list()
 for (resp in names(families)) {
   sp_names <- if (resp == "unmapped") names(specs_unm) else names(specs)
   for (sp in sp_names) {
-    nm <- paste(resp, sp, sep = "__"); message("Fitting ", nm)
-    fits[[nm]] <- bam(as.formula(paste(resp, "~", spec_formula(resp, sp))), data = d, family = families[[resp]],
-                      method = "fREML", discrete = TRUE, select = TRUE, nthreads = CFG$nthreads)
+    nm <- paste(resp, sp, sep = "__")
+    if (same_model(old_fits[[nm]], resp, sp)) {
+      message("Reusing saved model ", nm); fits[[nm]] <- old_fits[[nm]]
+    } else {
+      message("Fitting ", nm)
+      fits[[nm]] <- bam(as.formula(paste(resp, "~", spec_formula(resp, sp))), data = d, family = families[[resp]],
+                        method = "fREML", discrete = TRUE, select = TRUE, nthreads = CFG$nthreads)
+    }
   }
 }
-saveRDS(fits, out_a("fits.rds"))
+saveRDS(fits, fits_file)
 
 ## ---- A2. Diagnostics -------------------------------------------------------------------
 # Moran's I of deviance residuals (inverse-distance weights, permutation p-value)
@@ -311,7 +328,7 @@ predict_gradient <- function(m, var) {
                      lat = median(sub$lat), lon = median(sub$lon))
     nd <- nd[rep(1, 100), ]
     nd[[var]] <- seq(quantile(sub[[var]], .01), quantile(sub[[var]], .99), length.out = 100)
-    p <- predict(m, nd, type = "link", se.fit = TRUE, exclude = excl, newdata.guaranteed = TRUE)
+    p <- predict(m, nd, type = "link", se.fit = TRUE, exclude = excl, newdata.guaranteed = TRUE, discrete = FALSE)
     li <- family(m)$linkinv
     data.frame(Alpine = nd$Alpine, x = nd[[var]], fit = li(p$fit),
                lo = li(p$fit - 1.96 * p$se.fit), hi = li(p$fit + 1.96 * p$se.fit))
@@ -416,11 +433,16 @@ assemble_fig(file.path(out_folder, "figS2_unmapped_gradients.png"), list(list(pS
 # Where is the reference database less complete? One spatial spline (sos) for the lowland samples and
 # an alpine-specific one (difference surface), for the unmapped proportion at the median sequencing depth.
 # No elevation / latitude terms here: the surface is the regional pattern itself.
-m_sp <- bam(as.formula(sprintf(paste("unmapped ~ Alpine + s(log10_reads, k = 6) + s(lat, lon, bs = 'sos', k = %d)",
-                                     "+ s(lat, lon, bs = 'sos', by = AlpineO, k = %d)"),
-                               CFG$k_space, CFG$k_space_alpine)),
-            data = d, family = betar(link = "logit"), method = "fREML", discrete = TRUE,
-            select = TRUE, nthreads = CFG$nthreads)
+m_sp_file <- out_a("figS3_model.rds")
+m_sp <- if (REUSE_FITS && file.exists(m_sp_file)) readRDS(m_sp_file) else NULL
+if (is.null(m_sp) || length(m_sp$y) != nrow(d)) {
+  m_sp <- bam(as.formula(sprintf(paste("unmapped ~ Alpine + s(log10_reads, k = 6) + s(lat, lon, bs = 'sos', k = %d)",
+                                       "+ s(lat, lon, bs = 'sos', by = AlpineO, k = %d)"),
+                                 CFG$k_space, CFG$k_space_alpine)),
+              data = d, family = betar(link = "logit"), method = "fREML", discrete = TRUE,
+              select = TRUE, nthreads = CFG$nthreads)
+  saveRDS(m_sp, m_sp_file)
+} else message("Reusing saved model for Supplementary Figure 3")
 writeLines(capture.output(print(summary(m_sp))), out_a("figS3_spatial_model_summary.txt"))
 
 res <- CFG$grid_res; nx <- 360 / res; ny <- 180 / res
@@ -445,7 +467,7 @@ grp_fit <- bind_rows(lapply(levels(d$Alpine), function(g) {
   nd$Alpine  <- factor(g, levels = levels(d$Alpine))
   nd$AlpineO <- factor(g, levels = levels(d$Alpine), ordered = TRUE)
   nd$log10_reads <- median(d$log10_reads)
-  nd$fit <- as.numeric(predict(m_sp, nd, type = "response", newdata.guaranteed = TRUE))
+  nd$fit <- as.numeric(predict(m_sp, nd, type = "response", newdata.guaranteed = TRUE, discrete = FALSE))
   nd$n_near <- neighbourhood_n(d[d$Alpine == g, ])
   nd$fit_shown <- ifelse(nd$n_near >= CFG$min_support, nd$fit, NA_real_)
   nd$group <- g
@@ -654,7 +676,7 @@ predict_var <- function(m, P, v, spec) {
                      log10_geo = median(sub$log10_geo),
                      d_depth = median(sub$d_depth), d_unm = median(sub$d_unm))
     nd <- nd[rep(1, length(x)), ]; nd[[v]] <- x
-    data.frame(group = g, x = x, fit = as.numeric(predict(m, nd, type = "response")))
+    data.frame(group = g, x = x, fit = as.numeric(predict(m, nd, type = "response", discrete = FALSE)))
   }))
 }
 
@@ -775,7 +797,7 @@ for (sp in names(beta_specs)) {
 beta_caption <- sprintf(paste(
   "Dissimilarity between pairs of samples (within lowland, within alpine, between alpine and lowland; pair set: %s) against the difference in elevation",
   "and in latitude between the two samples. Beta-regression GAM partial curves (adjusted for geographic distance and for differences in sequencing depth and unmapped proportion): lines = median and ribbons =",
-  "95% interval (2.5-97.5th percentile) across %d replicate subsamples (each: %d random samples per group,",
+  "95%% interval (2.5-97.5th percentile) across %d replicate subsamples (each: %d random samples per group,",
   "%d random pairwise distances per comparison type); points = binned observed means. Pairs reuse samples,",
   "so the ribbon reflects subsampling variability, not a model-based confidence interval. Stars: median p across",
   "replicates of the difference smooths vs the within-lowland curve (*** p < 0.001, ** p < 0.01, * p < 0.05, ns);",
