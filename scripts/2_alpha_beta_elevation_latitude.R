@@ -25,17 +25,20 @@
 #   * Each replicate draws n_per_group random samples from the alpine and from the lowland
 #     samples, then n_pairs random pairwise distances for
 #     EACH of three comparisons: within lowland, within alpine, between alpine and lowland.
-#     n_rep replicates show sampling stability.
+#     The pairs of ALL n_rep replicates are pooled in one model per metric, with a random
+#     intercept for the replicate (s(rep_id, bs = "re")): all the data are used, and the
+#     differences between the replicate draws are absorbed by the random effect.
 #   * Bray-Curtis (relative abundances) and Jaccard (presence/absence after rarefaction to
 #     rare_depth reads), computed only for the drawn pairs from sparse matrices
 #     (checked against vegan::vegdist in TEST_MODE).
-#   * Beta-regression GAM on pairs: dissimilarity ~ group + s(|diff in log10 depth|)
+#   * Beta-regression GAM on the pooled pairs: dissimilarity ~ group + s(rep_id, "re") + s(|diff in log10 depth|)
 #     + s(|diff in unmapped proportion|)
 #     + s(d_elev), s(d_lat), s(log10 geo distance), each with difference smooths
 #     (within alpine and alpine-vs-lowland, relative to within lowland).
-#   CAVEAT: pairs reuse samples (each sample is in ~2 of the n_pairs pairs), so they are
-#   not fully independent: p-values in beta/models_summary.csv are descriptive only; judge
-#   robustness by the stability across replicates.
+#   CAVEAT: pairs reuse samples (within a replicate each sample is in ~2 of the n_pairs pairs, and
+#   a sample can be drawn in several replicates). The random effect for the replicate does not
+#   remove that dependence, so the confidence ribbons and the p-values / stars (beta/models_summary.csv,
+#   beta/group_difference_tests.csv) are descriptive and optimistic.
 #
 # FIGURES (in <out_folder>)
 #   fig2_alpha_beta_gradients.png : A, B = alpha diversity vs elevation and latitude;
@@ -66,7 +69,7 @@ suppressPackageStartupMessages({
 RUN_ALPHA <- TRUE    # part A (alpha diversity GAMs)
 RUN_BETA  <- TRUE    # part B (beta diversity; slow: reads the BIOM)
 TEST_MODE <- FALSE   # TRUE: tiny beta run (few samples, 1 replicate) to check that it works
-REUSE_FITS <- TRUE   # reuse the saved alpha models (alpha/fits.rds, alpha/figS3_model.rds) if they match the data and formulas
+REUSE_FITS <- TRUE   # reuse the saved alpha models (alpha/fits.rds, alpha/figS3_model.rds) and the saved beta pairs (beta/pairs_all.rds) if they match the data and settings
 
 args <- commandArgs(trailingOnly = TRUE)
 # Snakemake passes: args[1] = sample table (TSV), args[2] = all_sampled_data.csv, args[3] = filtered BIOM,
@@ -99,7 +102,7 @@ CFG <- list(
   moran_n_max = 1500, moran_nperm = 199,
   # --- part B ---
   n_per_group = 1000,           # random samples per group per replicate
-  n_rep       = 20,             # replicate random subsamples (each re-drawn from scratch); the 95% band needs many
+  n_rep       = 20,             # replicate random subsamples (each re-drawn from scratch), pooled with a random effect
   rare_depth  = 1000,           # rarefaction depth for Jaccard (samples below are dropped)
   n_pairs     = 1000,           # random pairwise distances per comparison type, replicate and pair set
   min_pairs   = 100,            # comparison types with fewer pairs are dropped from a model
@@ -525,7 +528,6 @@ sel <- lapply(seq_len(CFG$n_rep), function(r) {
   meta %>%
     group_by(Alpine) %>% slice_sample(n = CFG$n_per_group) %>% ungroup()
 })
-if (CFG$n_rep < 10) message("Note: a 95% interval across replicate curves is poorly defined with n_rep < 10")
 all_ids <- unique(unlist(lapply(sel, `[[`, "id")))
 message(length(all_ids), " distinct samples across ", CFG$n_rep, " replicate(s)")
 
@@ -620,14 +622,14 @@ make_pairs <- function(r) {
     stopifnot(err < 1e-8)
   }
 
-  pairs$rep <- r
+  pairs$rep_id <- r
   pairs$d_elev <- abs(S$elevation[pairs$i] - S$elevation[pairs$j])
   pairs$d_lat  <- abs(S$lat[pairs$i] - S$lat[pairs$j])
   pairs$geo_km <- geosphere::distHaversine(cbind(S$lon[pairs$i], S$lat[pairs$i]),
                                            cbind(S$lon[pairs$j], S$lat[pairs$j])) / 1000
   pairs$d_depth <- abs(S$log10_reads[pairs$i] - S$log10_reads[pairs$j])   # difference in sequencing depth
   pairs$d_unm   <- abs(S$unmapped[pairs$i] - S$unmapped[pairs$j])          # difference in unmapped proportion
-  pairs[, c("rep", "spec", "group", "bray", "jaccard", "d_elev", "d_lat", "geo_km", "d_depth", "d_unm")]
+  pairs[, c("rep_id", "spec", "group", "bray", "jaccard", "d_elev", "d_lat", "geo_km", "d_depth", "d_unm")]
 }
 
 ## ---- B3. Models ---------------------------------------------------------------------------------------
@@ -636,7 +638,6 @@ beta_metrics <- c(bray = "Bray\u2013Curtis", jaccard = "Jaccard (rarefied)")
 beta_vars    <- c(d_elev = "Elevation difference (km)", d_lat = "Latitude difference (\u00B0)",
              log10_geo = "Geographic distance (log10 km)")
 beta_specs   <- c(all_pairs = "Random pairs")
-grid_cache <- new.env()
 
 prep_pairs <- function(P, spec) {
   P <- as.data.frame(P[P$spec == spec, ])
@@ -647,98 +648,124 @@ prep_pairs <- function(P, spec) {
   P <- P[P$group %in% keep, ]
   P$group <- factor(P$group, levels = keep)
   P$groupO <- factor(P$group, levels = keep, ordered = TRUE)        # reference = first level
+  P$rep_id <- factor(P$rep_id)                                        # replicate: random effect
   P$log10_geo <- log10(pmax(P$geo_km, 0.1))
   P
 }
 
-fit_beta <- function(P, metric, spec) {
+fit_beta <- function(P, metric) {
   n <- nrow(P); P$y <- (P[[metric]] * (n - 1) + 0.5) / n          # squeeze into (0, 1)
   sm <- unlist(lapply(names(beta_vars), function(v)
     c(sprintf("s(%s, k = %d)", v, CFG$k_beta), sprintf("s(%s, by = groupO, k = %d)", v, CFG$k_beta))))
   # nuisance covariates shared by the three comparison types: differences in depth and unmapped proportion
   terms <- c("group", sprintf("s(d_depth, k = %d)", CFG$k_beta), sprintf("s(d_unm, k = %d)", CFG$k_beta), sm)
+  if (nlevels(P$rep_id) > 1) terms <- c(terms, "s(rep_id, bs = 're')")                  # random intercept: replicate
   bam(as.formula(paste("y ~", paste(terms, collapse = " + "))), data = P,
       family = betar(link = "logit"), method = "fREML", discrete = TRUE,
       select = TRUE, nthreads = CFG$nthreads)
 }
 
-# Partial curve of one pair variable per group (others at group medians), on a grid
-# fixed once per spec/group/variable so replicates can be averaged
-predict_var <- function(m, P, v, spec) {
+# Partial curve of one pair variable per group (others at group medians), from the pooled model: the replicate
+# random effect is left out (a typical replicate); the ribbon is the model's 95% confidence interval
+predict_var <- function(m, P, v) {
+  excl <- intersect("s(rep_id)", vapply(m$smooth, function(s) s$label, ""))
   bind_rows(lapply(levels(P$group), function(g) {
-    sub <- P[P$group == g, ]; key <- paste(spec, g, v)
-    if (is.null(grid_cache[[key]]))
-      grid_cache[[key]] <- seq(quantile(sub[[v]], .01), quantile(sub[[v]], .99), length.out = 80)
-    x <- grid_cache[[key]]
+    sub <- P[P$group == g, ]
+    x <- seq(quantile(sub[[v]], .01), quantile(sub[[v]], .99), length.out = 80)
     nd <- data.frame(group = factor(g, levels = levels(P$group)),
                      groupO = factor(g, levels = levels(P$group), ordered = TRUE),
                      d_elev = median(sub$d_elev), d_lat = median(sub$d_lat),
                      log10_geo = median(sub$log10_geo),
-                     d_depth = median(sub$d_depth), d_unm = median(sub$d_unm))
+                     d_depth = median(sub$d_depth), d_unm = median(sub$d_unm),
+                     rep_id = factor(levels(P$rep_id)[1], levels = levels(P$rep_id)))
     nd <- nd[rep(1, length(x)), ]; nd[[v]] <- x
-    data.frame(group = g, x = x, fit = as.numeric(predict(m, nd, type = "response", discrete = FALSE)))
+    p <- predict(m, nd, type = "link", se.fit = TRUE, exclude = excl, newdata.guaranteed = TRUE, discrete = FALSE)
+    li <- family(m)$linkinv
+    data.frame(group = g, x = x, fit = li(p$fit), lo = li(p$fit - 1.96 * p$se.fit), hi = li(p$fit + 1.96 * p$se.fit))
   }))
 }
 
-# Binned means of the observed dissimilarities (15 quantile bins per group): data check
+# Binned means of the observed dissimilarities (15 quantile bins per group, all replicates): data check
 bin_obs <- function(P, metric, v)
   P %>% group_by(group) %>% mutate(bin = ntile(.data[[v]], 15)) %>%
     group_by(group, bin) %>%
     summarise(x = mean(.data[[v]]), y = mean(.data[[metric]]), .groups = "drop")
 
+# all replicates: the random pairs and their dissimilarities. Saved (beta/pairs_all.rds) and reused on a rerun if the
+# settings and the drawn samples are the same, so a problem in the models does not cost the distance computation again.
+pairs_key <- list(n_rep = CFG$n_rep, n_per_group = CFG$n_per_group, n_pairs = CFG$n_pairs, rare_depth = CFG$rare_depth,
+                  n_ids = length(all_ids), ids_chars = sum(nchar(all_ids)), test = TEST_MODE)
+pairs_file <- out_b("pairs_all.rds")
+P_all <- NULL
+if (REUSE_FITS && file.exists(pairs_file)) {
+  cached <- readRDS(pairs_file)
+  if (identical(cached$key, pairs_key)) { P_all <- cached$pairs; message("Reusing saved pairs: ", pairs_file) }
+}
+if (is.null(P_all)) {
+  beta_pairs <- list()
+  for (r in seq_len(CFG$n_rep)) {
+    message("Replicate ", r, ": computing dissimilarities")
+    pr_r <- make_pairs(r)
+    if (is.null(pr_r)) { message("  no pairs drawn: skipping replicate"); next }
+    beta_pairs[[length(beta_pairs) + 1]] <- pr_r
+  }
+  P_all <- bind_rows(beta_pairs); rm(beta_pairs)
+  saveRDS(list(key = pairs_key, pairs = P_all), pairs_file)
+}
+
 preds <- list(); obs <- list(); summ <- list(); pair_counts <- list()
-for (r in seq_len(CFG$n_rep)) {
-  message("Replicate ", r, ": computing dissimilarities")
-  P_all <- make_pairs(r)
-  if (is.null(P_all)) { message("  no pairs drawn: skipping replicate"); next }
-  for (spec in names(beta_specs)) {
-    P <- prep_pairs(P_all, spec)
-    pair_counts[[paste(r, spec)]] <- P %>% count(group) %>% mutate(rep = r, spec = spec)
-    for (metric in names(beta_metrics)) {
-      message("  fitting ", spec, " / ", metric)
-      m <- tryCatch(fit_beta(P, metric, spec), error = function(e) { message("  FAILED: ", conditionMessage(e)); NULL })
-      if (is.null(m)) next
-      key <- paste(r, spec, metric)
-      preds[[key]] <- bind_rows(lapply(names(beta_vars), function(v)
-        cbind(rep = r, spec = spec, metric = metric, variable = v, predict_var(m, P, v, spec))))
-      obs[[key]] <- bind_rows(lapply(names(beta_vars), function(v)
-        cbind(rep = r, spec = spec, metric = metric, variable = v, bin_obs(P, metric, v))))
-      st <- as.data.frame(summary(m)$s.table); st$term <- rownames(st)
-      summ[[key]] <- cbind(rep = r, spec = spec, metric = metric, dev_expl = summary(m)$dev.expl,
-                           n_pairs = nrow(P), st)
-    }
+for (spec in names(beta_specs)) {
+  P <- prep_pairs(P_all, spec)
+  pair_counts[[spec]] <- P %>% count(rep_id, group) %>% mutate(spec = spec)
+  message(sprintf("%s: %d pairs from %d replicates", spec, nrow(P), nlevels(P$rep_id)))
+  for (metric in names(beta_metrics)) {
+    message("  fitting ", spec, " / ", metric, " (pooled, random effect: replicate)")
+    m <- tryCatch(fit_beta(P, metric), error = function(e) { message("  FAILED: ", conditionMessage(e)); NULL })
+    if (is.null(m)) next
+    key <- paste(spec, metric)
+    preds[[key]] <- bind_rows(lapply(names(beta_vars), function(v)
+      cbind(spec = spec, metric = metric, variable = v, predict_var(m, P, v))))
+    obs[[key]] <- bind_rows(lapply(names(beta_vars), function(v)
+      cbind(spec = spec, metric = metric, variable = v, bin_obs(P, metric, v))))
+    sm_m <- summary(m)
+    st <- as.data.frame(sm_m$s.table); st$term <- rownames(st)
+    one <- function(x) if (length(x) == 1 && is.numeric(x)) as.numeric(x) else NA_real_     # always exactly one number
+    # standard deviation of the replicate random effect (NA if this mgcv version returns it in another shape)
+    rep_sd <- tryCatch({
+      vc <- gam.vcomp(m, rescale = FALSE)
+      if (is.list(vc) && !is.matrix(vc)) vc <- vc$vc
+      one(if (is.matrix(vc)) vc["s(rep_id)", 1] else vc["s(rep_id)"])
+    }, error = function(e) NA_real_)
+    summ[[key]] <- data.frame(spec = spec, metric = metric, dev_expl = one(sm_m$dev.expl), n_pairs = nrow(P),
+                              replicate_sd = rep_sd, st, check.names = FALSE, stringsAsFactors = FALSE)
+    saveRDS(m, out_b(paste0("model_", spec, "_", metric, ".rds")))
   }
 }
 preds <- bind_rows(preds); obs <- bind_rows(obs)
-write.csv(bind_rows(summ), out_b("models_summary.csv"), row.names = FALSE)   # p-values: descriptive only
-
-# Difference smooths vs the within-lowland reference: median p across replicates (descriptive: pairs reuse samples)
 summ_all <- bind_rows(summ)
+write.csv(summ_all, out_b("models_summary.csv"), row.names = FALSE)   # p-values: descriptive only
+
+# Difference smooths vs the within-lowland reference (pooled model; descriptive: pairs reuse samples)
 pcol <- grep("^p[-.]value$", names(summ_all), value = TRUE)[1]
 beta_tests <- summ_all %>%
   filter(grepl("groupO", term)) %>%
   mutate(variable = ifelse(grepl("d_elev", term), "d_elev", ifelse(grepl("d_lat", term), "d_lat", "log10_geo")),
          contrast = sub(".*groupO", "", term), p = .data[[pcol]]) %>%
-  group_by(spec, metric, variable, contrast) %>%
-  summarise(p_med = median(p), n_rep = n(), .groups = "drop")
-write.csv(beta_tests, out_b("group_difference_tests_median_p.csv"), row.names = FALSE)
+  select(spec, metric, variable, contrast, p)
+write.csv(beta_tests, out_b("group_difference_tests.csv"), row.names = FALSE)
 star_of <- function(p, contrast, which) { v <- p[contrast == which]; if (length(v)) stars(v[1]) else "n/a" }
-beta_label <- function(tt) paste0(" vs within lowland:\n within alpine ", star_of(tt$p_med, tt$contrast, "Within alpine"),
-                                   " | alpine-lowland ", star_of(tt$p_med, tt$contrast, "Alpine vs lowland"))
+beta_label <- function(tt) paste0(" vs within lowland:\n within alpine ", star_of(tt$p, tt$contrast, "Within alpine"),
+                                   " | alpine-lowland ", star_of(tt$p, tt$contrast, "Alpine vs lowland"))
 write.csv(bind_rows(pair_counts), out_b("pair_counts.csv"), row.names = FALSE)
 write.csv(preds, out_b("predicted_curves.csv"), row.names = FALSE)
 
 ## ---- B4. Beta-diversity figures ----------------------------------------------------------------------------------------
-# One panel: one metric against one pair variable (line = median, ribbon = 95% interval across replicates,
-# points = binned observed means)
+# One panel: one metric against one pair variable (line = pooled model, ribbon = its 95% confidence interval,
+# points = binned observed means of all replicates)
 beta_panel <- function(mt, vv, sp, tag) {
   sel_rows <- function(d) d[d$spec == sp & d$metric == mt & d$variable == vv, ]
-  pr <- sel_rows(preds); ob <- sel_rows(obs)
-  # median curve and 95% interval (2.5-97.5th percentile) across the replicate curves
-  pm <- pr %>% group_by(group, x) %>%
-    summarise(mid = median(fit), lo = quantile(fit, 0.025), hi = quantile(fit, 0.975), .groups = "drop")
-  # binned observed means, averaged over replicates (one point per group and bin)
-  ob <- ob %>% group_by(group, bin) %>% summarise(x = mean(x), y = mean(y), .groups = "drop")
+  pm <- sel_rows(preds); ob <- sel_rows(obs)
+  pm$mid <- pm$fit
   for (nm in c("ob", "pm")) {
     d <- get(nm); d$group <- factor(d$group, levels = beta_groups); assign(nm, d)
   }
@@ -768,10 +795,7 @@ for (sp in names(beta_specs)) {
     d
   }
   pr <- lab(pr); ob <- lab(ob)
-  pm <- pr %>% group_by(metric, variable, group, x) %>%
-    summarise(mid = median(fit), lo = quantile(fit, 0.025), hi = quantile(fit, 0.975), .groups = "drop")
-  ob <- ob %>% group_by(metric, variable, group, bin) %>%
-    summarise(x = mean(x), y = mean(y), .groups = "drop")
+  pm <- pr; pm$mid <- pm$fit
   ann_g <- beta_tests %>% filter(spec == sp) %>% group_by(metric, variable) %>%
     group_modify(~ data.frame(label = beta_label(.x))) %>% ungroup()
   ann_g$metric   <- factor(beta_metrics[ann_g$metric], levels = beta_metrics)
@@ -796,12 +820,12 @@ for (sp in names(beta_specs)) {
 
 beta_caption <- sprintf(paste(
   "Dissimilarity between pairs of samples (within lowland, within alpine, between alpine and lowland; pair set: %s) against the difference in elevation",
-  "and in latitude between the two samples. Beta-regression GAM partial curves (adjusted for geographic distance and for differences in sequencing depth and unmapped proportion): lines = median and ribbons =",
-  "95%% interval (2.5-97.5th percentile) across %d replicate subsamples (each: %d random samples per group,",
-  "%d random pairwise distances per comparison type); points = binned observed means. Pairs reuse samples,",
-  "so the ribbon reflects subsampling variability, not a model-based confidence interval. Stars: median p across",
-  "replicates of the difference smooths vs the within-lowland curve (*** p < 0.001, ** p < 0.01, * p < 0.05, ns);",
-  "descriptive, because pairs reuse samples."),
+  "and in latitude between the two samples. One beta-regression GAM per metric on the pooled pairs of %d replicate subsamples",
+  "(each: %d random samples per group, %d random pairwise distances per comparison type), with a random intercept for the replicate",
+  "and adjusted for geographic distance and for differences in sequencing depth and unmapped proportion: lines = fitted curves,",
+  "ribbons = 95%% confidence intervals of the pooled model, points = binned observed means. Pairs reuse samples, so the intervals and",
+  "the stars (p of the difference smooths vs the within-lowland curve: *** p < 0.001, ** p < 0.01, * p < 0.05, ns) are descriptive",
+  "and optimistic."),
   beta_specs[[CFG$main_beta_spec]], CFG$n_rep, CFG$n_per_group, CFG$n_pairs)
 
 # Supplementary Figure 1: Jaccard (rarefied presence/absence)
@@ -822,11 +846,11 @@ if (RUN_ALPHA && RUN_BETA) {
     "A, B: alpha diversity along elevation (A) and latitude (B); GAM partial effects adjusted for sequencing depth and unmapped proportion, solid = net of space",
     "(95% CI), dashed = no spatial term; stars = test that the alpine gradient differs in shape from the lowland",
     "one (net model; *** p < 0.001, ** p < 0.01, * p < 0.05, ns). C, D: Bray-Curtis dissimilarity between pairs of samples (within lowland, within alpine, between alpine and lowland) against the",
-    sprintf("difference in elevation (C) and latitude (D); lines = median, ribbons = 95%% interval across %d replicate subsamples",
-            CFG$n_rep),
-    sprintf("(each: %d random samples per group, %d random pairwise distances per comparison type), points = binned observed means.",
-            CFG$n_per_group, CFG$n_pairs),
-    "Stars in C, D: median p across replicates of the difference smooths vs within lowland (descriptive).",
+    sprintf("difference in elevation (C) and latitude (D); one model on the pooled pairs of %d replicate subsamples (each: %d random samples per group,",
+            CFG$n_rep, CFG$n_per_group),
+    sprintf("%d random pairwise distances per comparison type) with a random intercept for the replicate; lines = fitted curves, ribbons = 95%% confidence intervals, points = binned observed means.",
+            CFG$n_pairs),
+    "Stars in C, D: p of the difference smooths vs within lowland (descriptive and optimistic: pairs reuse samples).",
     "Jaccard: Supplementary Figure 1.")
   assemble_fig(file.path(out_folder, "fig2_alpha_beta_gradients.png"),
                list(list(pA, pB), list(pC, pD)), list(get_legend(pA), get_legend(pC)), main_caption,
