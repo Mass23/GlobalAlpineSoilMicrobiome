@@ -21,8 +21,11 @@ Terrain variables (from a small window of the DEM centred on each point):
   aspect_eastness       sin(aspect)
   tpi_m                 Topographic Position Index: elevation - mean of a ~200 m ring around it
   roughness_m           terrain ruggedness index: RMS elevation difference to the 3x3 neighbours
-A point within ~1 pixel of a DEM tile edge gets a smaller, boundless-padded window; too few valid
-pixels around a point (open water, a DEM void) leaves these columns empty and is noted in the log.
+A point within ~1 pixel of a DEM tile edge gets a smaller, boundless-padded window. A point without
+terrain values is classified and logged (and listed in dem_gaps.csv next to the output):
+  no_tile        the DEM has no tile there (open water, some tiny islands)       -> NA, not retried
+  no_data_pixel  the tile exists but the pixel at the point is no-data           -> NA
+  failed         network / server trouble (retried; exit code 1, a rerun retries only those)
 Terrain does not depend on the sampling date, so every point gets values whatever its date looks like.
 
 Other DEM-derived variables worth adding later if useful: a wetness index (needs a full drainage
@@ -135,18 +138,44 @@ def dem_tile_url(lon: float, lat: float) -> str:
     return f"{DEM_AWS_BASE}/{name}/{name}.tif"
 
 
+NO_TILE = "no_tile"                             # fetch_dem_window result: the DEM has no tile at this point
+_TILE_EXISTS: dict = {}                         # tile url -> bool (a 1 x 1 degree tile is asked about once)
+
+
+def tile_exists(pc: Planetary, url: str) -> bool:
+    """True / False for a tile that is / is not in the bucket; anything else (5xx, timeouts) raises"""
+    if url in _TILE_EXISTS:
+        return _TILE_EXISTS[url]
+    r = pc.s.head(url, timeout=60, allow_redirects=True)
+    if r.status_code == 200:
+        ok = True
+    elif r.status_code in (403, 404):           # S3 answers 403 for a key that does not exist
+        ok = False
+    else:
+        raise RuntimeError(f"HTTP {r.status_code} for {url}")
+    _TILE_EXISTS[url] = ok
+    return ok
+
+
 def fetch_dem_window(pc: Planetary, lon: float, lat: float):
+    """a record {grid, px_x_deg, px_y_deg}, or NO_TILE; read errors are NOT swallowed (they are real failures)"""
     if DEM_SOURCE == "aws":
-        try:
-            arr, px_x_deg, px_y_deg = read_window(dem_tile_url(lon, lat), lon, lat, DEM_TPI_RADIUS)
-        except rasterio.errors.RasterioIOError:      # no tile (open ocean has none) or unreadable
-            return None
+        url = dem_tile_url(lon, lat)
+        if not tile_exists(pc, url):
+            return NO_TILE
     else:
         feats = pc.search(DEM_COLLECTION, lon, lat, eps=0.01)
         if not feats:
-            return None
-        href = pc.sign(DEM_COLLECTION, feats[0]["assets"][DEM_ASSET]["href"])
-        arr, px_x_deg, px_y_deg = read_window(href, lon, lat, DEM_TPI_RADIUS)
+            return NO_TILE
+        url = pc.sign(DEM_COLLECTION, feats[0]["assets"][DEM_ASSET]["href"])
+    for attempt in range(1, TRIES + 1):
+        try:
+            arr, px_x_deg, px_y_deg = read_window(url, lon, lat, DEM_TPI_RADIUS)
+            break
+        except Exception:                        # GDAL has already retried the HTTP request itself
+            if attempt == TRIES:
+                raise
+            time.sleep(5 * attempt)
     return {
         "grid": [[None if np.ma.is_masked(v) else float(v) for v in row] for row in arr],
         "px_x_deg": px_x_deg, "px_y_deg": px_y_deg,
@@ -228,7 +257,8 @@ def main() -> int:
     log.info("%d points, %d unique coordinates", len(df), len(dem_keys))
 
     cache = Cache(CACHE_JSONL)
-    dem_todo = [k for k in dem_keys if ("dem", k) not in cache.data]
+    # an earlier version cached read errors as "None" (= no DEM): those are fetched again
+    dem_todo = [k for k in dem_keys if cache.data.get(("dem", k)) is None and ("dem_gap", k) not in cache.data]
     log.info("DEM: %d cached, %d to fetch", len(dem_keys) - len(dem_todo), len(dem_todo))
 
     session = make_session()
@@ -239,8 +269,8 @@ def main() -> int:
             ok = fetch_dem_window(pc, 8.5, 46.5)
         except Exception as e:
             raise RuntimeError(f"DEM preflight failed (DEM_SOURCE = {DEM_SOURCE!r}): {e}") from e
-        if ok is None:
-            raise RuntimeError(f"DEM preflight: no DEM pixel at 8.5E 46.5N (DEM_SOURCE = {DEM_SOURCE!r}); "
+        if ok == NO_TILE:
+            raise RuntimeError(f"DEM preflight: no DEM tile at 8.5E 46.5N (DEM_SOURCE = {DEM_SOURCE!r}); "
                                f"check the network / the tile URL {dem_tile_url(8.5, 46.5)}")
     with ThreadPoolExecutor(N_WORKERS) as pool:
         futs = {}
@@ -251,7 +281,11 @@ def main() -> int:
         for i, fut in enumerate(as_completed(futs), 1):
             kind, key = futs[fut]
             try:
-                cache.add(kind, key, fut.result())
+                res = fut.result()
+                if res == NO_TILE:
+                    cache.add("dem_gap", key, NO_TILE)      # deterministic: not retried
+                else:
+                    cache.add(kind, key, res)
                 consecutive = 0
             except Exception as e:
                 failed[(kind, key)] = str(e)
@@ -270,24 +304,32 @@ def main() -> int:
     # ---- assemble -----------------------------------------------------------
     terrain_cols = ["elevation_m", "slope_deg", "aspect_deg", "aspect_northness", "aspect_eastness",
                     "tpi_m", "roughness_m"]
-    out_rows, no_dem = [], 0
+    out_rows, reasons = [], []
     for i in range(len(df)):
-        rec = cache.data.get(("dem", coord_key(lon[i], lat[i])))
+        ck = coord_key(lon[i], lat[i])
+        rec = cache.data.get(("dem", ck))
         terr = terrain_from_window(rec, lat[i]) if rec else None
-        if terr is None:
-            no_dem += 1
-            out_rows.append({c: np.nan for c in terrain_cols})
+        if terr is not None:
+            out_rows.append(terr); reasons.append("")
         else:
-            out_rows.append(terr)
-
+            out_rows.append({c: np.nan for c in terrain_cols})
+            reasons.append(("no_data_pixel" if rec else cache.data.get(("dem_gap", ck), "failed")))
     out = pd.concat([df, pd.DataFrame(out_rows)], axis=1)
     for c in terrain_cols:
         out[c] = out[c].astype(float).round(4)
     out.to_csv(OUT_CSV, index=False, na_rep="NA")
     log.info("wrote %s", OUT_CSV)
 
-    if no_dem:
-        log.warning("%d point(s) with no usable DEM pixel (tile gap, void, or ocean)", no_dem)
+    gaps = pd.DataFrame({"lon": lon, "lat": lat, "reason": reasons})
+    gaps = gaps[gaps["reason"] != ""]
+    if len(gaps):
+        per_coord = gaps.groupby(["lon", "lat", "reason"]).size().rename("n_points").reset_index()
+        per_coord.to_csv(OUT_CSV.with_name("dem_gaps.csv"), index=False)
+        for reason, g in per_coord.groupby("reason"):
+            ex = ", ".join(f"({r.lon:.3f}E {r.lat:.3f}N)" for r in g.head(6).itertuples())
+            log.warning("%d point(s) / %d coordinate(s) without terrain values: %s   e.g. %s",
+                        int(g.n_points.sum()), len(g), reason, ex)
+        log.info("all of them are listed in %s", OUT_CSV.with_name("dem_gaps.csv"))
     if failed:
         log.error("%d request(s) failed; rerun to retry them (cached values are reused)", len(failed))
         return 1

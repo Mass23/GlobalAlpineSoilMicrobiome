@@ -1,64 +1,63 @@
 #!/usr/bin/env python3
 """
-SoilGrids 2.0 soil properties at sampling points.
+SoilGrids 2.0 soil properties at sampling points, read straight from ISRIC's global map files.
 
-Run     python3 download_soilgrids.py [points.csv soilgrids_data.csv [properties]]
-        Snakemake passes the two paths; the tmp/ cache is written next to the output. `properties` is an
+Run     python3 download_soilgrids.py [points.csv soilgrids_data.csv [properties [lowland_sets.csv]]]
+        Snakemake passes the paths; the tmp/ cache is written next to the output. `properties` is an
         optional comma-separated list (e.g. phh2o,soc,nitrogen,clay,sand,silt,cec,bdod); empty = all.
-        SOILGRIDS_WORKERS (environment variable) sets the number of parallel requests (default 4).
+        `lowland_sets.csv` (from define_lowland_sets.py) restricts the download, see Subset.
+        SOILGRIDS_WORKERS (environment variable) = number of layers read in parallel (default 8).
 
-Subset: when points.csv has a `lowland_subset` column, only the rows marked "yes" (all alpine samples plus a
-random lowland subset of the same size, drawn in the Snakefile rule prepare_points) are fetched; the other rows
-stay NA. Without that column every row is fetched (ONLY_SUBSET = False also fetches everything).
-
-Speed: one WCS request per coordinate x property x layer is the whole cost (about 2.6 requests/s with 4
-workers). Only the layers the output needs are requested: the top three (0-5, 5-15, 15-30 cm) for every
-coordinate, plus a deeper layer only where a sample's depth_cm falls in it. Choosing fewer properties is
-the other big lever (each property = 3 requests per coordinate); the log shows the speed and an ETA.
 Reads   points.csv                   columns lat, lon, depth_cm (may be empty); others kept
 Writes  soilgrids_data.csv           points + two sets of columns per property:
           <prop>_30cm_avg   thickness-weighted mean of 0-5, 5-15, 15-30 cm (5:10:15)
           <prop>_depth_val  value of the SoilGrids layer containing depth_cm
                             (layer top <= depth < layer bottom, 200 cm included);
                             empty when depth_cm is empty or outside 0-200 cm
-        tmp/soilgrids_cache.jsonl       fetched pixels; lets an interrupted run resume
+        tmp/soilgrids_tiles_cache.jsonl   values read so far; lets an interrupted run resume
 
-Failures are of two kinds, handled differently:
-  * the server ANSWERED with an OGC service exception (e.g. a point outside the map: SoilGrids has no soil
-    on the ice sheets): asking again gives the same answer, so it is NOT retried; the value is NA, the
-    exception text is kept in the cache, and it does not make the run fail unless more than
-    MAX_REFUSED_FRACTION of the coordinates are refused (that would point at a bug, not at the map edge);
-  * network / server trouble (timeouts, 5xx, a non-XML page): retried TRIES times with a pause, then
-    reported as FAILED (exit code 1; a rerun retries only those).
+How the data are read (the same idea as the CHELSA script): ISRIC publishes every layer as a global VRT in the
+Interrupted Goode Homolosine projection (https://files.isric.org/soilgrids/latest/data/<prop>/<prop>_<depth>_mean.vrt),
+which GDAL reads remotely and only fetches the parts that are asked for. Each layer is opened ONCE and the pixels of
+all the coordinates that need it are read: the coordinates are converted to Homolosine, grouped by 512 x 512-pixel
+block, and each group is read with one window read. No per-point request, no WCS, no `soilgrids` package.
+The value is the native 250 m pixel that contains the point (no resampling). Points outside the map (the
+ice sheets, open water) or on a no-data pixel get NA; this is counted and logged, and never retried.
+
+Subset: with a lowland_sets.csv (one row per sample, column subset_any), only the points of the samples marked
+"yes" (every alpine sample + the lowland samples of the three comparison sets) are read; the other rows stay NA.
+Without that file every row is read (ONLY_SUBSET = False also reads everything).
+
+Only the layers the output needs are read: the top three (0-5, 5-15, 15-30 cm) for every coordinate, plus a
+deeper layer only where a sample's depth_cm falls in it.
+
+Failures: network trouble is retried (GDAL's own HTTP retries, then TRIES attempts per window). What still fails
+is reported (exit code 1) and a rerun reads only what is missing. A layer file that does not exist on the server
+(HTTP 404) is skipped with a warning: its columns stay NA and it does not make the run fail.
 
 Properties (mean prediction, converted to conventional units as in ISRIC's table):
   bdod kg/dm3, cec cmol(c)/kg, cfvo vol%, clay %, sand %, silt %, nitrogen g/kg, phh2o pH,
   soc g/kg, ocd kg/m3, wv0010 / wv0033 / wv1500 vol% (water content at 10 / 33 / 1500 kPa)
   ocs kg/m2: organic carbon STOCK, only published for 0-30 cm -> ocs_30cm_avg only
 SoilGrids layers: 0-5, 5-15, 15-30, 30-60, 60-100, 100-200 cm, 250 m resolution.
-
-Data access goes through the `soilgrids` package's WCS services (maps.isric.org). For each
-unique coordinate a 3x3-pixel tile (~250 m pixels) centred on the point is requested in
-EPSG:4326 and the centre pixel is read. The WCS connection is opened once per property;
-the package's get_coverage_data() would re-download the service description on every call
-and open results with rioxarray/pyproj, which needs PROJ's database.
 """
 # no `from __future__` import: keeps the file usable with Snakemake's `script:` preamble too
 import json
 import logging
 import os
-import re
 import sys
+import threading
 import time
-from collections import Counter
+import urllib.error
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import rasterio
-from rasterio.io import MemoryFile
-from soilgrids import SoilGrids
+import rasterio.warp
+from rasterio.windows import Window
 
 # --------------------------------------------------------------------------- settings
 # Snakemake: download_soilgrids.py <points.csv> <soilgrids_data.csv>; the defaults are for running by hand
@@ -66,7 +65,7 @@ PROJECT_DIR = Path("/home/renku/work/epfl-altshuler/GlobalAlpineSoilMicrobiome")
 POINTS_CSV = Path(sys.argv[1]) if len(sys.argv) >= 3 else PROJECT_DIR / "data/points.csv"
 OUT_CSV = Path(sys.argv[2]) if len(sys.argv) >= 3 else PROJECT_DIR / "data/soilgrids_data.csv"
 TMP_DIR = OUT_CSV.parent / "tmp"
-CACHE_JSONL = TMP_DIR / "soilgrids_cache.jsonl"
+CACHE_JSONL = TMP_DIR / "soilgrids_tiles_cache.jsonl"
 
 # property -> factor dividing the stored integers (ISRIC conversion table)
 PROPERTIES = {
@@ -74,7 +73,7 @@ PROPERTIES = {
     "nitrogen": 100, "phh2o": 10, "soc": 10, "ocd": 10,
     "wv0010": 10, "wv0033": 10, "wv1500": 10,
 }
-if len(sys.argv) >= 4 and sys.argv[3].strip():        # optional 3rd argument: which properties to fetch
+if len(sys.argv) >= 4 and sys.argv[3].strip():        # optional 3rd argument: which properties to read
     _wanted = [p.strip() for p in sys.argv[3].split(",") if p.strip()]
     _unknown = [p for p in _wanted if p not in PROPERTIES]
     if _unknown:
@@ -84,40 +83,32 @@ OCS_FACTOR = 10                                     # ocs: t/ha -> kg/m2, 0-30 c
 LAYERS = [(0, 5), (5, 15), (15, 30), (30, 60), (60, 100), (100, 200)]
 TOP30 = LAYERS[:3]
 STAT = "mean"
+NODATA = -32768                                     # SoilGrids Int16 no-data
 
-HALF_WIDTH_DEG = 0.003375                           # 3 x 3 tile of ~0.00225 deg (~250 m) pixels
-N_WORKERS = int(os.environ.get("SOILGRIDS_WORKERS", 4))   # parallel requests; keep modest for ISRIC
-TRIES = 3                                           # for network / server trouble only (see docstring)
-SUBSET_COLUMN = "lowland_subset"                    # points.csv column: "yes" = alpine + random lowland subset
-ONLY_SUBSET = True                                  # False: fetch every row even if that column exists
-MAX_REFUSED_FRACTION = 0.05                         # more refused coordinates than this = suspect, exit 1
-RETRY_REFUSED = False                               # True: ask again for coordinates refused in an earlier run
+VRT_BASE = "https://files.isric.org/soilgrids/latest/data"
+LONLAT = "+proj=longlat +datum=WGS84 +no_defs"
+IGH = "+proj=igh +lat_0=0 +lon_0=0 +datum=WGS84 +units=m +no_defs"   # ISRIC's Homolosine; no PROJ database needed
 
-# the package's catalogue lacks the water-retention layers; same WCS pattern at ISRIC
-for wv, kpa in [("wv0010", 10), ("wv0033", 33), ("wv1500", 1500)]:
-    SoilGrids.MAP_SERVICES.setdefault(wv, {
-        "name": f"Volumetric water content at {kpa} kPa",
-        "link": f"https://maps.isric.org/mapserv?map=/map/{wv}.map",
-        "units": "10^-3 cm3/cm3",
-    })
+N_WORKERS = int(os.environ.get("SOILGRIDS_WORKERS", 8))   # layers read in parallel
+TRIES = 3                                           # attempts per window / per file open, after GDAL's own retries
+BLOCK = 512                                         # pixels: coordinates are grouped by block of this size
+MAX_PIXELS_PER_POINT = 4096                         # a group window larger than this per point is read point by point
+GDAL_ENV = dict(
+    GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR",       # do not list the remote directory
+    CPL_VSIL_CURL_CACHE_SIZE="200000000",
+    GDAL_HTTP_MAX_RETRY="5",
+    GDAL_HTTP_RETRY_DELAY="3",
+    GDAL_HTTP_TIMEOUT="120",
+    GDAL_CACHEMAX=512,                              # MB; rasterio wants an int here
+    VSI_CACHE="TRUE",
+    VSI_CACHE_SIZE="134217728",
+)
+SUBSETS_CSV = Path(sys.argv[4]) if len(sys.argv) >= 5 and sys.argv[4].strip() else None   # lowland_sets.csv
+SUBSET_COLUMN = "subset_any"                        # column of that file: "yes" = read this sample
+ONLY_SUBSET = True                                  # False: read every row even if the file is given
+PREFLIGHT_POINT = (8.5, 46.5)                       # lon, lat of a point with soil data (Switzerland)
 
 log = logging.getLogger("soilgrids")
-
-
-class ServiceRefused(Exception):
-    """the WCS answered with an OGC service exception: the same request will get the same answer"""
-
-
-def service_exception(body: bytes):
-    """text of an OGC ServiceException / ExceptionReport, or None if the body is not one"""
-    text = body[:20000].decode("utf-8", "replace")
-    if "ExceptionReport" not in text:
-        return None
-    parts = re.findall(r"<(?:ows:)?(?:ServiceException|ExceptionText)\b([^>]*)>(.*?)</(?:ows:)?(?:ServiceException|ExceptionText)>",
-                       text, flags=re.S)
-    msg = " | ".join(" ".join((f"[{re.sub(chr(34), '', a).strip()}]" if a.strip() else "", m.strip())).strip()
-                     for a, m in parts)
-    return re.sub(r"\s+", " ", msg or text)[:500]
 
 
 def coverage_id(prop: str, top: int, bottom: int) -> str:
@@ -128,63 +119,122 @@ def coord_key(lon: float, lat: float) -> str:
     return f"{lon:.6f},{lat:.6f}"
 
 
-# --------------------------------------------------------------------------- WCS access
-class Services:
-    """One WCS connection per property, opened lazily through the soilgrids package."""
-
-    def __init__(self):
-        self._wcs, self._crs = {}, {}
-
-    def get(self, prop):
-        if prop not in self._wcs:
-            wcs, coverages = SoilGrids._get_service_and_coverage_list(prop)
-            crs = None
-            for cov in coverages:                   # EPSG:4326 code as the service spells it
-                codes = [c.getcodeurn() for c in wcs.contents[cov].supportedCRS]
-                crs = next((c for c in codes if c.endswith(":4326")), None)
-                break
-            if crs is None:
-                raise RuntimeError(f"{prop}: WCS offers no EPSG:4326 output")
-            self._wcs[prop], self._crs[prop] = (wcs, set(coverages)), crs
-        return self._wcs[prop], self._crs[prop]
+# --------------------------------------------------------------------------- reading the layers
+def layer_url(cov: str) -> str:
+    """GDAL path of a layer's global VRT, e.g. phh2o_0-5cm_mean -> .../phh2o/phh2o_0-5cm_mean.vrt"""
+    return f"/vsicurl/{VRT_BASE}/{cov.split('_')[0]}/{cov}.vrt"
 
 
-def read_centre(tif_bytes: bytes):
-    """centre pixel of a small GeoTIFF tile; None for nodata"""
-    with MemoryFile(tif_bytes) as mem, mem.open() as src:
-        arr = src.read(1, masked=True)
-        v = arr[arr.shape[0] // 2, arr.shape[1] // 2]
-        if np.ma.is_masked(v) or int(v) == -32768:
-            return None
-        return int(v)
+def open_layer(url: str):
+    return rasterio.open(url)
 
 
-def fetch(services: Services, prop: str, cov: str, lon: float, lat: float):
-    (wcs, _), crs = services.get(prop)
-    bbox = (lon - HALF_WIDTH_DEG, lat - HALF_WIDTH_DEG, lon + HALF_WIDTH_DEG, lat + HALF_WIDTH_DEG)
+def http_status(url: str):
+    """HTTP status of a HEAD request on a /vsicurl/ path (None if it is not an http(s) address or unreachable)"""
+    if not url.startswith("/vsicurl/http"):
+        return None
+    try:
+        req = urllib.request.Request(url[len("/vsicurl/"):], method="HEAD")
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return r.status
+    except urllib.error.HTTPError as e:
+        return e.code
+    except Exception:
+        return None
+
+
+class LayerMissing(Exception):
+    """the layer file does not exist on the server (HTTP 404)"""
+
+
+def open_with_retry(url: str):
+    last = None
     for attempt in range(1, TRIES + 1):
         try:
-            resp = wcs.getCoverage(identifier=cov, crs=crs, bbox=bbox, width=3, height=3,
-                                   response_crs=crs, format="GEOTIFF_INT16", timeout=120)
-            body = resp.read()
-            if "tiff" not in (resp.info().get("Content-Type", "") or "").lower():
-                refusal = service_exception(body)
-                if refusal is not None:
-                    raise ServiceRefused(refusal)
-                raise RuntimeError(body[:300].decode("utf-8", "replace"))
-            return read_centre(body)
-        except ServiceRefused:
-            raise                                   # the server answered: asking again changes nothing
-        except Exception:
-            if attempt == TRIES:
-                raise
-            time.sleep(10 * attempt)
+            return open_layer(url)
+        except Exception as e:                       # rasterio.errors.RasterioIOError and friends
+            last = e
+            if http_status(url) == 404:
+                raise LayerMissing(url) from e
+            if attempt < TRIES:
+                time.sleep(5 * attempt)
+    raise RuntimeError(f"cannot open {url}: {last}") from last
+
+
+def to_igh(lons, lats):
+    xs, ys = rasterio.warp.transform(LONLAT, IGH, [float(v) for v in lons], [float(v) for v in lats])
+    return np.asarray(xs, float), np.asarray(ys, float)
+
+
+def pixel_index(src, xs, ys):
+    """(row, col) of the pixel that contains each (x, y); the raster is assumed north-up (VRT of tiles)"""
+    t = src.transform
+    cols = np.floor((xs - t.c) / t.a)
+    rows = np.floor((ys - t.f) / t.e)
+    return rows, cols
+
+
+def read_group(src, rows, cols):
+    """raw integers at the given pixels; one window read when the points are close, point by point otherwise"""
+    r0, r1, c0, c1 = int(rows.min()), int(rows.max()), int(cols.min()), int(cols.max())
+    h, w = r1 - r0 + 1, c1 - c0 + 1
+    out = []
+    if h * w <= MAX_PIXELS_PER_POINT * len(rows):
+        arr = src.read(1, window=Window(c0, r0, w, h))
+        vals = arr[(rows - r0).astype(int), (cols - c0).astype(int)]
+    else:
+        vals = np.array([src.read(1, window=Window(int(c), int(r), 1, 1))[0, 0] for r, c in zip(rows, cols)])
+    return [None if int(v) == NODATA else int(v) for v in vals]
+
+
+def read_layer(cov: str, cks: list, xy: dict, cache, progress):
+    """read one layer for all the coordinates in `cks`; returns (n_value, n_nodata, n_outside, failed_cks)"""
+    n_value = n_nodata = n_outside = n_logged = 0
+    failed = []
+    with rasterio.Env(**GDAL_ENV):
+        src = open_with_retry(layer_url(cov))
+        try:
+            xs = np.array([xy[ck][0] for ck in cks]); ys = np.array([xy[ck][1] for ck in cks])
+            rows, cols = pixel_index(src, xs, ys)
+            inside = (rows >= 0) & (rows < src.height) & (cols >= 0) & (cols < src.width) & np.isfinite(rows) & np.isfinite(cols)
+            for i in np.flatnonzero(~inside):                    # outside the map: NA, deterministic
+                cache.add(cov, cks[i], None); n_outside += 1
+            progress(int((~inside).sum()))
+            idx = np.flatnonzero(inside)
+            groups = {}
+            for i in idx:
+                groups.setdefault((int(rows[i]) // BLOCK, int(cols[i]) // BLOCK), []).append(i)
+            for members in groups.values():
+                members = np.array(members)
+                for attempt in range(1, TRIES + 1):
+                    try:
+                        vals = read_group(src, rows[members], cols[members])
+                        break
+                    except Exception as e:
+                        if attempt == TRIES:
+                            failed += [cks[i] for i in members]
+                            n_logged += 1
+                            if n_logged <= 3:                    # the first few, then only the total at the end
+                                log.error("FAILED %s (%d points near %s): %s", cov, len(members), cks[members[0]], str(e)[:200])
+                            vals = None
+                        else:
+                            time.sleep(5 * attempt)
+                if vals is not None:
+                    for i, v in zip(members, vals):
+                        cache.add(cov, cks[i], v)
+                        n_value += v is not None; n_nodata += v is None
+                    progress(len(members))
+        finally:
+            src.close()
+    if failed:
+        log.error("%s: %d of %d values could not be read", cov, len(failed), len(cks))
+    return n_value, n_nodata, n_outside, failed
 
 
 # --------------------------------------------------------------------------- cache
 class Cache:
     def __init__(self, path: Path):
-        self.path, self.data, self.refused = path, {}, {}
+        self.path, self.data, self.lock = path, {}, threading.Lock()
         if path.exists():
             with open(path) as fh:
                 for line in fh:
@@ -192,23 +242,13 @@ class Cache:
                         r = json.loads(line)
                     except json.JSONDecodeError:
                         continue
-                    key = (r["cov"], r["ck"])
-                    if r.get("refused") is not None:        # a recorded refusal (value NA)
-                        self.refused[key] = r["refused"]
-                        if RETRY_REFUSED:
-                            continue                        # not cached: it is asked again
-                    self.data[key] = r["raw"]
+                    self.data[(r["cov"], r["ck"])] = r["raw"]
 
     def add(self, cov, ck, raw):
-        self.data[(cov, ck)] = raw
-        with open(self.path, "a") as fh:
-            fh.write(json.dumps({"cov": cov, "ck": ck, "raw": raw}) + "\n")
-
-    def add_refused(self, cov, ck, message):
-        self.data[(cov, ck)] = None
-        self.refused[(cov, ck)] = message
-        with open(self.path, "a") as fh:
-            fh.write(json.dumps({"cov": cov, "ck": ck, "raw": None, "refused": message}) + "\n")
+        with self.lock:
+            self.data[(cov, ck)] = raw
+            with open(self.path, "a") as fh:
+                fh.write(json.dumps({"cov": cov, "ck": ck, "raw": raw}) + "\n")
 
 
 # --------------------------------------------------------------------------- points
@@ -239,17 +279,21 @@ def layer_for(depth: float):
 def main() -> int:
     logging.basicConfig(level=logging.INFO, stream=sys.stderr, force=True,
                         format="%(asctime)s %(levelname)-7s %(message)s", datefmt="%H:%M:%S")
-    logging.getLogger("rasterio").setLevel(logging.ERROR)   # PROJ chatter; values need no CRS
+    logging.getLogger("rasterio").setLevel(logging.ERROR)
     OUT_CSV.parent.mkdir(parents=True, exist_ok=True)
     TMP_DIR.mkdir(parents=True, exist_ok=True)
 
     df, lat, lon, depth = read_points(POINTS_CSV)
-    if ONLY_SUBSET and SUBSET_COLUMN in df.columns:      # only the flagged rows are fetched; the rest stay NA
-        use = df[SUBSET_COLUMN].astype(str).str.strip().str.lower().eq("yes").to_numpy()
+    if ONLY_SUBSET and SUBSETS_CSV is not None:          # only the flagged samples are read; the rest stay NA
+        if "site" not in df.columns:
+            raise ValueError(f"{POINTS_CSV} needs a `site` column to apply {SUBSETS_CSV}")
+        sets = pd.read_csv(SUBSETS_CSV)
+        yes_sites = set(sets.loc[sets[SUBSET_COLUMN].astype(str).str.strip().str.lower() == "yes", "site"].astype(str))
+        use = df["site"].astype(str).isin(yes_sites).to_numpy()
     else:
         use = np.ones(len(df), dtype=bool)
     coords = sorted({coord_key(lon[i], lat[i]) for i in np.flatnonzero(use)})
-    log.info("%d points, %d of them fetched (%s), %d unique coordinates, %d with a depth", len(df), int(use.sum()),
+    log.info("%d points, %d of them read (%s), %d unique coordinates, %d with a depth", len(df), int(use.sum()),
              SUBSET_COLUMN if use.sum() < len(df) else "all rows", len(coords), int(np.isfinite(depth[use]).sum()))
 
     # layers needed per coordinate: the top 30 cm (for <prop>_30cm_avg) and, only where a sample has a depth_cm,
@@ -262,47 +306,76 @@ def main() -> int:
         if layer:
             layers.add(layer)
     cache = Cache(CACHE_JSONL)
-    todo, needed = [], 0
+    jobs, needed = {}, 0
     for ck, layers in layers_needed.items():
-        wanted = [(p, coverage_id(p, t, b)) for p in PROPERTIES for t, b in sorted(layers)]
-        wanted.append(("ocs", "ocs_0-30cm_mean"))
+        wanted = [coverage_id(p, t, b) for p in PROPERTIES for t, b in sorted(layers)] + ["ocs_0-30cm_mean"]
         needed += len(wanted)
-        todo += [(p, cov, ck) for p, cov in wanted if (cov, ck) not in cache.data]
-    log.info("%d requests needed (%d cached) for %d properties: %s", len(todo), needed - len(todo),
+        for cov in wanted:
+            if (cov, ck) not in cache.data:
+                jobs.setdefault(cov, []).append(ck)
+    total = sum(len(v) for v in jobs.values())
+    log.info("%d values to read in %d layers (%d cached) for %d properties: %s", total, len(jobs), needed - total,
              len(PROPERTIES), ",".join(PROPERTIES))
 
-    services, failed, unavailable = Services(), {}, set()
-    with rasterio.Env(), ThreadPoolExecutor(N_WORKERS) as pool:
-        futures = {}
-        for p, cov, ck in todo:
-            try:
-                (_, covs), _ = services.get(p)          # opens the service once, in main thread
-            except Exception as e:
-                if p not in unavailable:
-                    log.error("service %s unavailable: %s", p, e)
-                unavailable.add(p)
-                continue
-            if cov not in covs:
-                unavailable.add(cov)
-                continue
-            lo, la = map(float, ck.split(","))
-            futures[pool.submit(fetch, services, p, cov, lo, la)] = (cov, ck)
-        t0 = time.monotonic()
-        for i, fut in enumerate(as_completed(futures), 1):
-            cov, ck = futures[fut]
-            try:
-                cache.add(cov, ck, fut.result())
-            except ServiceRefused as e:
-                cache.add_refused(cov, ck, str(e))          # NA, not retried, not a failure by itself
-            except Exception as e:
-                failed[(cov, ck)] = str(e)
-                log.error("FAILED %s at %s: %s", cov, ck, str(e)[:200])
-            if i % 100 == 0 or i == len(futures):
-                rate = i / max(time.monotonic() - t0, 1e-9)
-                log.info("  %d/%d requests done (%.1f/s, about %.1f h left)", i, len(futures), rate,
-                         (len(futures) - i) / rate / 3600)
-    if unavailable:
-        log.warning("not offered by the WCS (left empty): %s", ", ".join(sorted(unavailable)))
+    failed, missing_layers, stats = [], [], {}
+    if jobs:
+        # coordinates -> Homolosine, once for all layers
+        todo_cks = sorted({ck for v in jobs.values() for ck in v})
+        lo, la = np.array([list(map(float, ck.split(","))) for ck in todo_cks]).T
+        x, y = to_igh(lo, la)
+        xy = {ck: (xi, yi) for ck, xi, yi in zip(todo_cks, x, y)}
+
+        # preflight: open one layer and read a point with soil data, so a problem shows up at once and clearly
+        first = sorted(jobs)[0]
+        try:
+            with rasterio.Env(**GDAL_ENV):
+                src = open_with_retry(layer_url(first))
+                try:
+                    log.info("layer %s: %d x %d px, %s, nodata %s, CRS: %s", first, src.width, src.height, src.dtypes[0],
+                             src.nodata, (src.crs.to_string()[:70] if src.crs else "none"))
+                    px, py = to_igh([PREFLIGHT_POINT[0]], [PREFLIGHT_POINT[1]])
+                    r, c = pixel_index(src, px, py)
+                    probe = read_group(src, r, c)[0] if (0 <= r[0] < src.height and 0 <= c[0] < src.width) else None
+                finally:
+                    src.close()
+        except LayerMissing:
+            raise RuntimeError(f"layer file {first} does not exist on the server: check VRT_BASE ({VRT_BASE})")
+        except Exception as e:
+            raise RuntimeError(f"SoilGrids preflight failed on {first}: {e}") from e
+        if probe is None:
+            raise RuntimeError(f"preflight: no soil value at lon {PREFLIGHT_POINT[0]}, lat {PREFLIGHT_POINT[1]} in {first}: "
+                               f"the projection or the file layout is not what this script assumes")
+        log.info("preflight OK: raw value %d at lon %.1f, lat %.1f", probe, *PREFLIGHT_POINT)
+
+        done, t0, last_log, lock = 0, time.monotonic(), time.monotonic(), threading.Lock()
+
+        def progress(n):
+            nonlocal done, last_log
+            with lock:
+                done += n
+                if time.monotonic() - last_log > 30:
+                    last_log = time.monotonic()
+                    rate = done / max(last_log - t0, 1e-9)
+                    log.info("  %d/%d values (%.0f/s, about %.1f h left)", done, total, rate, (total - done) / rate / 3600)
+
+        with ThreadPoolExecutor(N_WORKERS) as pool:
+            futures = {pool.submit(read_layer, cov, cks, xy, cache, progress): cov for cov, cks in jobs.items()}
+            for fut in as_completed(futures):
+                cov = futures[fut]
+                try:
+                    n_value, n_nodata, n_outside, bad = fut.result()
+                    stats[cov] = (n_value, n_nodata, n_outside)
+                    failed += [(cov, ck) for ck in bad]
+                except LayerMissing:
+                    missing_layers.append(cov)
+                    log.warning("layer %s does not exist on the server (404): left NA", cov)
+                except Exception as e:
+                    failed += [(cov, ck) for ck in jobs[cov]]
+                    log.error("FAILED layer %s: %s", cov, str(e)[:200])
+        log.info("read %d values in %.1f min", done, (time.monotonic() - t0) / 60)
+        if stats:
+            n_v = sum(s[0] for s in stats.values()); n_n = sum(s[1] for s in stats.values()); n_o = sum(s[2] for s in stats.values())
+            log.info("values: %d with data, %d on a no-data pixel (water, ice, bare rock...), %d outside the map", n_v, n_n, n_o)
 
     # ---- assemble -----------------------------------------------------------
     def value(prop, top, bottom, ck, factor):
@@ -333,26 +406,21 @@ def main() -> int:
     out.to_csv(OUT_CSV, index=False, na_rep="NA")
     log.info("wrote %s", OUT_CSV)
 
-    too_many_refused = False
-    if cache.refused:
-        refused_coords = sorted({ck for (_, ck) in cache.refused})
-        lats = [float(ck.split(",")[1]) for ck in refused_coords]
-        log.warning("%d of %d coordinate(s) were refused by the WCS for at least one layer (NA in the output); "
-                    "latitudes %.1f to %.1f", len(refused_coords), len(coords), min(lats), max(lats))
-        for msg, n in Counter(cache.refused.values()).most_common(3):
-            log.warning("  %d x  %s", n, msg)
-        if len(refused_coords) > MAX_REFUSED_FRACTION * len(coords):
-            log.error("more than %.0f%% of the coordinates were refused: that points at a bug or a service "
-                      "problem, not at the edge of the map", 100 * MAX_REFUSED_FRACTION)
-            too_many_refused = True
-
+    first_prop = next(iter(PROPERTIES))
+    ref = f"{first_prop}_30cm_avg"
+    n_na = int(out.loc[use, ref].isna().sum())
+    if use.sum():
+        log.info("%s is NA for %d of %d points (%.1f%%): no-data pixels and points outside the map",
+                 ref, n_na, int(use.sum()), 100 * n_na / use.sum())
     n_bad_depth = int((np.isfinite(depth) & np.array([layer_for(d) is None for d in depth])).sum())
     if n_bad_depth:
         log.warning("%d depth_cm value(s) outside 0-200 cm -> _depth_val left empty", n_bad_depth)
+    if missing_layers:
+        log.warning("layers not on the server: %s", ", ".join(sorted(missing_layers)))
     if failed:
-        log.error("%d request(s) failed; rerun to retry them (cached values are reused)", len(failed))
+        log.error("%d value(s) failed; rerun to read them (cached values are reused)", len(failed))
         return 1
-    return 1 if too_many_refused else 0
+    return 0
 
 
 if __name__ == "__main__":
