@@ -25,7 +25,7 @@ The value is the native 250 m pixel that contains the point (no resampling). Poi
 ice sheets, open water) or on a no-data pixel get NA; this is counted and logged, and never retried.
 
 Subset: with a lowland_sets.csv (one row per sample, column subset_any), only the points of the samples marked
-"yes" (every alpine sample + the lowland samples of the three comparison sets) are read; the other rows stay NA.
+"yes" (every alpine sample + the lowland samples of any of the lowland replicates) are read; the other rows stay NA.
 Without that file every row is read (ONLY_SUBSET = False also reads everything).
 
 Only the layers the output needs are read: the top three (0-5, 5-15, 15-30 cm) for every coordinate, plus a

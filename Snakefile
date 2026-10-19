@@ -19,6 +19,7 @@ OTHER_CSV = f"{DATA}/other_data.csv"
 SAMPLE_DATA_FILTERED = f"{DATA}/sample_data_filtered.tsv"
 SAMPLE_ACCESSIONS = f"{DATA}/sample_accessions.txt"
 DATA_POINTS = f"{DATA}/points.csv"
+LOWLAND_SETS = f"{DATA}/lowland_sets.csv"          # one row per sample: group + the lowland replicates (rep_01 ... rep_20)
 
 # raw BIOM and the filtered one
 RAW_BIOM = f"{DATA}/microbeatlas/otuTable_soilCurated_OTU97_nextMAPrelease.biom"
@@ -27,7 +28,7 @@ FILTERED_BIOM = f"{DATA}/microbeatlas/otuTable_soilCurated_OTU97_nextMAPrelease_
 ALL_DATA_CSV = f"{RESULTS}/all_sampled_data.csv"
 
 # the flag files below are written by the analysis scripts themselves, inside the folder they are given
-DONE_1 = f"{RESULTS}/1_alpha_overview/.done"
+DONE_1 = f"{RESULTS}/1_alpha_overview/fig1_panels.rds"
 DONE_2 = f"{RESULTS}/2_alpha_beta_elevation_latitude/.done"
 
 rule all:
@@ -95,46 +96,52 @@ rule filter_biom:
         biom subset-table -i {input.biom} -a sample -s {input.samples} -o {output}
         """
 
-# points.csv: one row per sample x location x depth x date, plus the column lowland_subset:
-#   "yes" = every alpine sample + randomly drawn lowland samples (5 x the number of alpine ones), "no" = the others.
-# The draw is per SAMPLE (site), reproducible and independent of row order. Optional keys in smk_config.yaml:
-#   lowland_subset_seed:  23     seed of the random draw (default 23)
-#   lowland_subset_ratio: 5.0    lowland samples drawn per alpine sample (default 5; 1.0 = the same number)
-# download_soilgrids.py only fetches the "yes" rows (soil is the slow download); the others stay NA there.
+# points.csv: one row per sample x location x depth x date (site, lat, lon, sample_date, depth_cm)
 rule prepare_points:
     input:
         SAMPLE_DATA_FILTERED
     output:
         DATA_POINTS
-    params:
-        seed=config.get("lowland_subset_seed", 23),
-        ratio=config.get("lowland_subset_ratio", 5.0)
     run:
-        import numpy as np
         import pandas as pd
 
         # tab-separated, no quoting: text fields can contain commas and double quotes
         df = pd.read_csv(input[0], sep="\t", quoting=csv.QUOTE_NONE, low_memory=False)
 
-        points = df[["Sample_acc", "Latitude", "Longitude", "Depth_m", "Date_collected", "Alpine"]].copy()
-        points.columns = ["site", "lat", "lon", "depth_m", "sample_date", "group"]
-
-        # lowland_subset: all alpine samples + randomly drawn lowland samples (same number x ratio)
-        is_alpine = points.groupby("site")["group"].apply(lambda g: bool((g == "Alpine").any()))
-        alpine_sites = is_alpine.index[is_alpine.to_numpy()].to_numpy()
-        lowland_sites = np.sort(is_alpine.index[~is_alpine.to_numpy()].to_numpy())
-        n = min(len(lowland_sites), int(round(float(params.ratio) * len(alpine_sites))))
-        chosen = np.random.default_rng(int(params.seed)).choice(lowland_sites, size=n, replace=False)
-        keep = set(alpine_sites) | set(chosen)
-        points["lowland_subset"] = np.where(points["site"].isin(keep), "yes", "no")
-        print(f"lowland_subset: {len(alpine_sites)} alpine + {n} of {len(lowland_sites)} lowland samples = "
-              f"{len(alpine_sites) + n} samples marked yes")
-
+        points = df[["Sample_acc", "Latitude", "Longitude", "Depth_m", "Date_collected"]].copy()
+        points.columns = ["site", "lat", "lon", "depth_m", "sample_date"]
         points["depth_cm"] = points["depth_m"] * 100
-        points = points.drop(columns=["depth_m", "group"])    # depth_m was "depth_M" in an earlier version: lower case
-        points = points.drop_duplicates()                     # several read sets can share one sample
+        points = points.drop(columns=["depth_m"])      # was "depth_M" in an earlier version: lower case
+        points = points.drop_duplicates()              # several read sets can share one sample
 
         points.to_csv(output[0], index=False)
+
+# Lowland replicates (needs the DEM elevation, so it runs after download_other_data): n_rep random draws of lowland samples that are
+# EVENLY SPACED over latitude / longitude (5-degree cells, one sample per cell in turn, at most one per thin_m metres), each with as
+# many lowland samples as there are alpine samples (seed-controlled, reproducible). Columns rep_01 ... rep_<n_rep> (yes / no);
+# all alpine samples are "yes" in every replicate; subset_any = alpine or in at least one replicate (what the soil download
+# fetches: the UNION of the replicates; see lowland_sets_summary.csv for its size). Optional keys in smk_config.yaml (defaults shown):
+#   lowland_sets_seed: 23        lowland_sets_ratio: 1.0 (lowland samples per alpine sample)
+#   lowland_sets_cell_deg: 5     lowland_sets_n_rep: 20       lowland_sets_thin_m: 100
+rule define_lowland_sets:
+    input:
+        table=SAMPLE_DATA_FILTERED,
+        other=OTHER_CSV
+    output:
+        LOWLAND_SETS
+    conda:
+        "envs/others/environment.yml"
+    params:
+        seed=config.get("lowland_sets_seed", 23),
+        ratio=config.get("lowland_sets_ratio", 1.0),
+        cell=config.get("lowland_sets_cell_deg", 5),
+        n_rep=config.get("lowland_sets_n_rep", 20),
+        thin=config.get("lowland_sets_thin_m", 100)
+    shell:
+        """
+        python3 scripts/define_lowland_sets.py {input.table} {input.other} {output} \
+            --seed {params.seed} --ratio {params.ratio} --cell-deg {params.cell} --n-rep {params.n_rep} --thin-m {params.thin}
+        """
 
 rule download_chelsa:
     input:
@@ -148,12 +155,14 @@ rule download_chelsa:
         python3 scripts/download_chelsa.py {input} {output}
         """
 
+# Soil is fetched for the samples of lowland_sets.csv with subset_any = yes only (the others stay NA).
 # soil_properties (optional, in smk_config.yaml): the SoilGrids properties to fetch, e.g.
 #   soil_properties: [phh2o, soc, nitrogen, clay, sand, silt, cec, bdod]
 # Each property costs 3 requests per coordinate, so fewer properties = a much shorter run. Empty / absent = all 13.
 rule download_soilgrids:
     input:
-        DATA_POINTS
+        points=DATA_POINTS,
+        sets=LOWLAND_SETS
     output:
         SOIL_CSV
     conda:
@@ -162,7 +171,7 @@ rule download_soilgrids:
         properties=",".join(config.get("soil_properties", []))
     shell:
         """
-        python3 scripts/download_soilgrids.py {input} {output} "{params.properties}"
+        python3 scripts/download_soilgrids.py {input.points} {output} "{params.properties}" {input.sets}
         """
 
 rule download_other_data:
@@ -179,16 +188,19 @@ rule download_other_data:
 
 rule download_earth_data:
     input:
-        CHELSA_CSV, SOIL_CSV, OTHER_CSV
+        chelsa=CHELSA_CSV,
+        soil=SOIL_CSV,
+        other=OTHER_CSV,
+        sets=LOWLAND_SETS
     output:
         ALL_DATA_CSV
     run:
         import pandas as pd
         from pathlib import Path
 
-        chelsa = pd.read_csv(input[0])
-        soil = pd.read_csv(input[1])
-        other = pd.read_csv(input[2])
+        chelsa = pd.read_csv(input.chelsa)
+        soil = pd.read_csv(input.soil)
+        other = pd.read_csv(input.other)
 
         key_cols = [
             col for col in chelsa.columns
@@ -215,6 +227,11 @@ rule download_earth_data:
             on=key_cols,
             suffixes=("", ".other"),
         )
+
+        # which samples are alpine, and in which lowland replicates (rep_01 ...) they are drawn (one row per sample, joined by site)
+        sets = pd.read_csv(input.sets)
+        sets = sets[[c for c in sets.columns if c in ("site", "group", "n_rep_selected", "subset_any") or c.startswith("rep_")]]
+        merged = merged.merge(sets, on="site", how="left")
 
         Path(output[0]).parent.mkdir(parents=True, exist_ok=True)
         merged.to_csv(output[0], index=False)

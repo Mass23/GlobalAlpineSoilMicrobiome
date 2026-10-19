@@ -26,13 +26,13 @@
 #     alpine sample and give each location (samples within thin_m metres) a random intercept, plus a spherical spline for the
 #     regional trend; the lowland group (data-rich) is thinned to one sample per location (a random effect with ~100k levels is
 #     not feasible in mgcv; see alpha_cluster_*). BETA pairs are drawn from one random sample per location in each replicate:
-#     different replicates draw different samples of a location, so all samples are used across the replicates. The three
-#     fixed lowland sets of
-#     define_lowland_sets.py (random / spatially even / elevation representation, as many lowland samples as alpine ones, kept
-#     for the soil data) would discard most of the lowland data. The even coverage of the gradients comes from the way the
-#     pairs are drawn instead (next point). The three sets are for the analyses that need soil data or compare alpine and
-#     lowland samples as groups: Figure 3 and 5 (elevation set; headline), Figure 4 and 5 (spatially even set), all
-#     with the random set as the baseline check (flags: subset_* columns of all_sampled_data.csv).
+#     different replicates draw different samples of a location, so all samples are used across the replicates. The LOWLAND
+#     samples of replicate r come from the random draw rep_r of define_lowland_sets.py (n_rep draws, EVENLY SPACED over
+#     latitude / longitude cells, as many lowland samples as alpine ones; flags rep_01 ... in the earth-data table), so that
+#     densely sampled regions do not dominate; every alpine sample is in every replicate (use_replicate_sets = FALSE: every
+#     lowland sample is a candidate in every replicate). The same replicates are meant for the analyses that need soil data
+#     (Figures 3-5): analyse replicate by replicate and combine. The even coverage of the gradients (elevation, distance)
+#     comes from the way the pairs are drawn (next point).
 #   * Pairs are drawn at random within geographic distance classes (dist_breaks_km: short distances would hardly be
 #     represented by random pairs) crossed with elevation-difference classes (elev_breaks_km: lowland pairs hardly differ in
 #     elevation otherwise), shared as evenly as possible over the classes, and WITHIN latitude zones (lat_breaks / lat_zone_names; default: southern hemisphere, northern
@@ -141,6 +141,8 @@ CFG <- list(
   # --- part B ---
   n_per_group = 1000,           # random samples per group AND latitude zone per replicate
   n_rep       = 20,             # replicate random subsamples (each re-drawn from scratch), pooled with a random effect
+  use_replicate_sets = TRUE,    # lowland samples of replicate r = those flagged rep_<r> by define_lowland_sets.py (evenly spaced over lat/lon);
+                                #   FALSE (or no rep_ columns in the earth-data table): every lowland sample is a candidate in every replicate
   rare_depth  = 1000,           # rarefaction depth for Jaccard (samples below are dropped)
   n_pairs     = 1000,           # pairs per pair type, latitude zone and replicate (shared as evenly as possible over the distance x elevation classes)
   min_pairs   = 100,            # cells (pair type x zone) with fewer pairs are dropped from the models
@@ -290,7 +292,8 @@ if (!file.exists(CFG$env_file)) stop("env_file not found: ", CFG$env_file)
 env <- read.csv(CFG$env_file, stringsAsFactors = FALSE)
 if (!all(c(CFG$env_id, CFG$env_elev) %in% names(env)))
   stop("env_file lacks column(s): check CFG$env_id / CFG$env_elev")
-env <- data.frame(.env_id = env[[CFG$env_id]], .elev_m = env[[CFG$env_elev]])
+rep_cols_env <- grep("^rep_[0-9]+$", names(env), value = TRUE)          # lowland replicates written by define_lowland_sets.py
+env <- data.frame(.env_id = env[[CFG$env_id]], .elev_m = env[[CFG$env_elev]], env[rep_cols_env], check.names = FALSE)
 env <- env[!duplicated(env$.env_id), ]
 raw <- dplyr::left_join(raw, env, by = setNames(".env_id", CFG$alpha_id))
 message(sprintf("Elevation joined for %d / %d rows", sum(is.finite(raw$.elev_m)), nrow(raw)))
@@ -678,7 +681,8 @@ meta <- raw %>%
     lon       = Longitude, lat = Latitude,
     elevation = .elev_m / 1000,                                     # km
     log10_reads = log10(alpha_total_n_reads),
-    unmapped  = unmapped_raw_counts / total_raw_counts
+    unmapped  = unmapped_raw_counts / total_raw_counts,
+    across(all_of(rep_cols_env))                                    # replicate flags (yes / no) of the lowland samples
   ) %>%
   filter(is.finite(lon), is.finite(lat), abs(lon) <= 180, abs(lat) <= 90,
          is.finite(elevation), is.finite(log10_reads), is.finite(unmapped), !is.na(Alpine), !is.na(id))
@@ -687,23 +691,33 @@ meta$zone <- lat_zone(meta$lat)
 print(table(zone = meta$zone, group = meta$Alpine))
 
 ## ---- B1. Replicate subsamples and counts -------------------------------------------------------
-# Each replicate draws, within each group AND latitude zone, up to n_per_group samples in random order such that no two of
+# Replicate pools: define_lowland_sets.py draws n_rep random sets of lowland samples that are EVENLY SPACED over latitude / longitude
+# (flags rep_01 ... in the earth-data table). Replicate r takes ALL alpine samples and only the lowland samples flagged in rep_r.
+# Then each replicate draws, within each group AND latitude zone, up to n_per_group samples in random order such that no two of
 # them are closer than CFG$thin_m metres (and none share coordinates): the pairs then come from different places, not from
 # one site or study, and every zone is represented by a comparable number of samples
+rep_cols <- grep("^rep_[0-9]+$", names(meta), value = TRUE)
+use_sets <- isTRUE(CFG$use_replicate_sets) && length(rep_cols) >= CFG$n_rep
+message(if (use_sets) sprintf("Replicate pools: all alpine samples + the lowland samples flagged in %s ... %s (random draws evenly spaced over latitude / longitude)",
+                               rep_cols[1], rep_cols[CFG$n_rep])
+        else "No replicate pools (use_replicate_sets = FALSE, or fewer than n_rep columns rep_01, ... in the earth-data table): every lowland sample is a candidate in every replicate")
+pool_of <- function(r) if (use_sets) meta[meta$Alpine == "Alpine" | meta[[rep_cols[r]]] %in% "yes", ] else meta
 set.seed(99)
+pool1 <- pool_of(1)
 for (g in levels(meta$Alpine)) for (z in zone_names) {
-  ix <- which(meta$Alpine == g & meta$zone == z)
+  ix <- which(pool1$Alpine == g & pool1$zone == z)
   if (!length(ix)) { message(sprintf("  %s / %s: no samples", g, z)); next }
   capped <- length(ix) > 20000                        # counting all the thinned samples is only done for smaller sets
-  n_av <- length(thin_sites(meta$lat[ix], meta$lon[ix], CFG$thin_m, n_max = if (capped) CFG$n_per_group else Inf))
+  n_av <- length(thin_sites(pool1$lat[ix], pool1$lon[ix], CFG$thin_m, n_max = if (capped) CFG$n_per_group else Inf))
   message(sprintf("  spatial thinning (one sample per %g m), %s / %s: %s%d of %d samples can be drawn%s", CFG$thin_m, g, z,
                   if (capped) "at least " else "", n_av, length(ix),
                   if (n_av < CFG$n_per_group) sprintf(" (fewer than n_per_group = %d: each replicate takes all of them)", CFG$n_per_group) else ""))
 }
 sel <- lapply(seq_len(CFG$n_rep), function(r) {
   set.seed(100 + r)
+  pool <- pool_of(r)
   bind_rows(lapply(levels(meta$Alpine), function(g) bind_rows(lapply(zone_names, function(z) {
-    mg <- meta[meta$Alpine == g & meta$zone == z, ]
+    mg <- pool[pool$Alpine == g & pool$zone == z, ]
     if (nrow(mg) == 0) return(NULL)
     mg[thin_sites(mg$lat, mg$lon, CFG$thin_m, n_max = CFG$n_per_group), ]
   }))))
@@ -1005,7 +1019,7 @@ std_dissim <- function(m, P) {
 # ---- all replicates: the random pairs and their dissimilarities. Saved (beta/pairs_all.rds) and reused on a rerun if the
 # settings and the drawn samples are the same, so a problem in the models does not cost the distance computation again.
 pairs_key <- list(dist_breaks = CFG$dist_breaks_km, elev_breaks = CFG$elev_breaks_km, n_rep = CFG$n_rep, n_per_group = CFG$n_per_group, n_pairs = CFG$n_pairs, rare_depth = CFG$rare_depth,
-                  n_ids = length(all_ids), ids_chars = sum(nchar(all_ids)), lat_breaks = CFG$lat_breaks,
+                  n_ids = length(all_ids), ids_chars = sum(nchar(all_ids)), use_sets = use_sets, lat_breaks = CFG$lat_breaks,
                   zones = zone_names, thin_m = CFG$thin_m, test = TEST_MODE, design = "cells-v3")
 pairs_file <- out_b("pairs_all.rds")
 P_all <- NULL
