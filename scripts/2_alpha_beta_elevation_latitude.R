@@ -20,31 +20,43 @@
 #   between alpine and lowland (alpha/group_difference_tests.csv, printed on the figure).
 #   NB: the sos spline absorbs much of the latitudinal signal (concurvity).
 #
-# PART B  beta diversity (community dissimilarity) vs DIFFERENCE in elevation, DIFFERENCE
-#   in latitude and geographic distance, within lowland and within alpine pairs
-#   * Each replicate draws n_per_group random samples from the alpine and from the lowland
-#     samples, then n_pairs random pairwise distances for
-#     EACH of three comparisons: within lowland, within alpine, between alpine and lowland.
-#     The pairs of ALL n_rep replicates are pooled in one model per metric, with a random
-#     intercept for the replicate (s(rep_id, bs = "re")): all the data are used, and the
-#     differences between the replicate draws are absorbed by the random effect.
-#   * Bray-Curtis (relative abundances) and Jaccard (presence/absence after rarefaction to
-#     rare_depth reads), computed only for the drawn pairs from sparse matrices
-#     (checked against vegan::vegdist in TEST_MODE).
-#   * Beta-regression GAM on the pooled pairs: dissimilarity ~ group + s(rep_id, "re") + s(|diff in log10 depth|)
-#     + s(|diff in unmapped proportion|)
-#     + s(d_elev), s(d_lat), s(log10 geo distance), each with difference smooths
-#     (within alpine and alpine-vs-lowland, relative to within lowland).
-#   CAVEAT: pairs reuse samples (within a replicate each sample is in ~2 of the n_pairs pairs, and
-#   a sample can be drawn in several replicates). The random effect for the replicate does not
-#   remove that dependence, so the confidence ribbons and the p-values / stars (beta/models_summary.csv,
-#   beta/group_difference_tests.csv) are descriptive and optimistic.
+# PART B  beta diversity (community dissimilarity) between pairs of samples
+#   * SAMPLE POOLS. Figure 2 uses ALL samples (spatially thinned): the gradient models condition on elevation, latitude and
+#     distance, so an unbalanced design does not bias the curves, and the three fixed lowland sets of
+#     define_lowland_sets.py (random / spatially even / elevation representation, as many lowland samples as alpine ones, kept
+#     for the soil data) would discard most of the lowland data. The even coverage of the gradients comes from the way the
+#     pairs are drawn instead (next point). The three sets are for the analyses that need soil data or compare alpine and
+#     lowland samples as groups: Figure 3 and 5 (elevation set; headline), Figure 4 and 5 (spatially even set), all
+#     with the random set as the baseline check (flags: subset_* columns of all_sampled_data.csv).
+#   * Pairs are drawn at random within geographic distance classes (dist_breaks_km: short distances would hardly be
+#     represented by random pairs) crossed with elevation-difference classes (elev_breaks_km: lowland pairs hardly differ in
+#     elevation otherwise), shared as evenly as possible over the classes, and WITHIN latitude zones (lat_breaks / lat_zone_names; default: southern hemisphere, northern
+#     mid-latitudes 0-60, northern high latitudes > 60) and within three pair types: within lowland, within alpine,
+#     alpine vs lowland. A "cell" = pair type x zone. Samples are spatially thinned (at most one per thin_m metres, and
+#     no shared coordinates) and every replicate draws n_per_group samples per group and zone and n_pairs pairs per cell.
+#   * Bray-Curtis (relative abundances) and Jaccard (presence/absence after rarefaction to rare_depth reads), computed
+#     only for the drawn pairs from sparse matrices (checked against vegan::vegdist in TEST_MODE).
+#   * Two beta-regression GAMs per metric, each on the pooled pairs of all n_rep replicates with a random intercept for
+#     the replicate and a curve per cell (smooths with by = cell, bs = "ts"):
+#       elev: s(d_elev) + s(log10 geographic distance) + s(d_depth) + s(d_unm)   -> elevation difference ACCOUNTING FOR SPACE
+#       lat : s(d_lat)  + s(d_elev)                    + s(d_depth) + s(d_unm)   -> latitude difference ACCOUNTING FOR ELEVATION
+#   * STANDARDISED DISSIMILARITY (beta/standardized_dissimilarity.csv, standardized_contrasts.csv, Figure 2b): from the
+#     elev model, the dissimilarity two samples of a cell are predicted to have at the SAME geographic distance (ref_km),
+#     the typical elevation difference of the pair type and median depth / unmapped differences. This removes what makes
+#     regions incomparable otherwise (spatial extent, elevation range, sequencing), so that zones and pair types can be
+#     compared: e.g. alpine pairs in the northern high latitudes vs the northern mid-latitudes, or the southern vs the
+#     northern hemisphere. The contrasts come with 95% intervals.
+#   CAVEAT: pairs reuse samples (within a replicate each sample is in ~2 of the n_pairs pairs, and a sample can be drawn
+#   in several replicates). The random effect for the replicate does not remove that dependence, so the intervals are
+#   descriptive and optimistic; judge robustness by the size of the effects and their consistency.
 #
 # FIGURES (in <out_folder>)
-#   fig2_alpha_beta_gradients.png : A, B = alpha diversity vs elevation and latitude;
-#                                   C, D = Bray-Curtis vs elevation and latitude difference
-#   figS1_beta_jaccard.png        : Supplementary Figure 1 = same as C, D with Jaccard
-#   alpha/ and beta/              : full grids (all metrics / variables / specs), tables, diagnostics
+#   fig2_alpha_beta_gradients.png : A = alpha diversity vs elevation (3 metrics), B = vs latitude (signed),
+#                                   C = Bray-Curtis vs elevation difference (accounting for space) and vs latitude
+#                                   difference (accounting for elevation), by pair type (colour) and zone (line type)
+#   fig2b_standardized_dissimilarity.png : standardised dissimilarity per zone and pair type
+#   figS1_beta_jaccard.png        : Supplementary Figure 1 = same as C with Jaccard
+#   alpha/ and beta/              : full grids, tables, diagnostics
 #
 # Input : <data_folder>/sample_data_filtered.tsv, elevation from env_file and, for part B,
 #         the filtered BIOM written by microbeatlas_filter_data.R
@@ -92,9 +104,17 @@ CFG <- list(
   biom_file   = filtered_biom,  # written by the Snakemake rule filter_biom
   biom_id     = "Accessions",   # column of alpha_file that matches the BIOM sample IDs
   # --- part A ---
-  abs_lat     = TRUE,           # alpha panels: TRUE: |latitude|; FALSE: signed latitude
-  beta_lat    = "hemisphere",   # beta latitude difference: "hemisphere" = only pairs of samples from the SAME hemisphere, signed
-                                #   difference (0-90); "absolute" = difference of |latitude|, all pairs (0-90); "signed" = all pairs (0-180)
+  abs_lat     = FALSE,          # alpha panels B: FALSE = signed latitude, TRUE = |latitude|
+  lat_breaks  = c(0, 60),       # latitude zones (degrees; beta pairs are only drawn WITHIN a zone): -90 to 0, 0 to 60, 60 to 90
+  lat_zone_names = c("Southern hemisphere", "Northern mid-latitudes", "Northern high latitudes"),   # one name per zone
+  dist_breaks_km = c(0, 10, 100, 1000, 5000, Inf),   # pairs are drawn at random WITHIN these geographic distance classes (km) ...
+  elev_breaks_km = c(0, 0.1, 0.5, 1, 2, Inf),        # ... crossed with these classes of the elevation difference (km): every elevation
+                                                     #   difference is represented, also among the lowland pairs (equal numbers per class)
+  ref_km      = c(100, 1000),   # standardised dissimilarity: reference geographic distances (km)
+  ref_zone    = "Northern mid-latitudes",   # zone the other zones are compared with in standardized_contrasts.csv (else: the zone with most pairs)
+  thin_m      = 100,            # biogeography (beta subsamples, and alpha gradients if thin_alpha): at most ONE sample per this radius
+                                #   (metres, chosen at random); 0 = only distinct coordinates (exact duplicates removed)
+  thin_alpha  = TRUE,           # also thin the data of the alpha gradient models (part A), within the alpine and the lowland group
   k_space     = 60,             # basis dimension of the sos spatial spline
   k_space_alpine = 30,          # Supplementary Figure 3: basis dimension of the alpine-specific surface
   grid_res    = 2,              # Supplementary Figure 3: grid resolution (degrees)
@@ -103,21 +123,20 @@ CFG <- list(
   n_rug       = 3000,           # rug marks drawn per group (plot only)
   moran_n_max = 1500, moran_nperm = 199,
   # --- part B ---
-  n_per_group = 1000,           # random samples per group per replicate
+  n_per_group = 1000,           # random samples per group AND latitude zone per replicate
   n_rep       = 20,             # replicate random subsamples (each re-drawn from scratch), pooled with a random effect
   rare_depth  = 1000,           # rarefaction depth for Jaccard (samples below are dropped)
-  n_pairs     = 1000,           # random pairwise distances per comparison type, replicate and pair set
-  min_pairs   = 100,            # comparison types with fewer pairs are dropped from a model
+  n_pairs     = 1000,           # pairs per pair type, latitude zone and replicate (shared as evenly as possible over the distance x elevation classes)
+  min_pairs   = 100,            # cells (pair type x zone) with fewer pairs are dropped from the models
   k_smooth    = 5,              # basis dimension of every 1-D smooth (alpha and beta models): small = smooth curves
   bs_smooth   = "ts",           # thin plate spline WITH shrinkage (the null space is penalised too)
   select      = FALSE,          # TRUE would add a second shrinkage penalty on top of "ts"
-  beta_points = "all",          # beta panels: "all" = every pair of every replicate as a point; "binned" = 15 binned means per group
-  beta_point_alpha = 0.08,      # transparency of those points
+  beta_points_max = 60000,      # beta panels: number of pairs drawn as points (random subset; 0 = none)
+  beta_point_alpha = 0.06,      # transparency of those points
   beta_zoom   = TRUE,           # beta panels: zoom the y axis on the bulk of the pairs (the few far below are not drawn; FALSE: 0-1)
   beta_zoom_q = 0.05,           # lower edge of that window = this quantile of the dissimilarities (or the lowest ribbon edge, if lower)
   # --- main figure ---
   main_alpha_metrics = c("richness", "shannon", "pielou"),   # alpha metrics shown in panels A, B
-  main_beta_spec     = "all_pairs",                          # pair set shown in panels C, D
   # --- common ---
   nthreads    = 4,
   cols        = c(Lowland = "#7C9885", Alpine = "#2B6CB0"),
@@ -135,6 +154,37 @@ out_b <- function(...) file.path(out_folder, "beta", ...)
 set.seed(1)
 
 # term of a 1-D smooth (used by the alpha AND the beta models): thin plate spline with shrinkage, small k
+# Spatial thinning: keep one randomly chosen sample per `radius_m` metres (greedy, in random order; radius 0 = distinct
+# coordinates only). Returns the indices kept (at most n_max, in the order drawn). Exact great-circle neighbourhoods (3D
+# coordinates on the globe, a hash of cells of the radius size), so it also works for hundreds of thousands of samples.
+thin_sites <- function(lat, lon, radius_m, n_max = Inf) {
+  n <- length(lat); ord <- sample.int(n); r <- max(radius_m, 0); cell <- max(r, 1)
+  R <- 6371008.8
+  la <- lat * pi / 180; lo <- lon * pi / 180
+  X <- R * cos(la) * cos(lo); Y <- R * cos(la) * sin(lo); Z <- R * sin(la)
+  cx <- floor(X / cell); cy <- floor(Y / cell); cz <- floor(Z / cell)
+  off <- 2^17; key <- function(a, b, c) sprintf("%.0f", (a + off) + 2^19 * (b + off) + 2^38 * (c + off))
+  nb <- as.matrix(expand.grid(-1:1, -1:1, -1:1))          # the 27 neighbouring cells
+  seen <- new.env(hash = TRUE, parent = emptyenv()); keep <- integer(0)
+  for (i in ord) {
+    js <- unlist(mget(key(cx[i] + nb[, 1], cy[i] + nb[, 2], cz[i] + nb[, 3]), envir = seen, ifnotfound = list(NULL)), use.names = FALSE)
+    if (length(js) && any((X[js] - X[i])^2 + (Y[js] - Y[i])^2 + (Z[js] - Z[i])^2 <= r^2)) next
+    k <- key(cx[i], cy[i], cz[i]); seen[[k]] <- c(seen[[k]], i); keep[length(keep) + 1L] <- i
+    if (length(keep) >= n_max) break
+  }
+  keep
+}
+
+# Latitude zones of the beta analysis: pairs are only drawn within a zone (never across zones)
+zone_edges  <- c(-90, CFG$lat_breaks, 90)
+zone_range  <- sprintf("%g to %g", head(zone_edges, -1), tail(zone_edges, -1))
+if (length(CFG$lat_zone_names) != length(zone_range))
+  stop("CFG$lat_zone_names needs ", length(zone_range), " names (one per zone: ", paste(zone_range, collapse = ", "), ")")
+zone_names  <- CFG$lat_zone_names
+zone_desc   <- sprintf("%s: %s degrees", zone_names, zone_range)
+lat_zone    <- function(lat) as.character(cut(lat, breaks = c(-Inf, CFG$lat_breaks, Inf), labels = zone_names, right = FALSE))
+beta_types  <- c("Within lowland", "Within alpine", "Alpine vs lowland")     # pair types
+
 sm1 <- function(v, by = NULL) sprintf("s(%s, bs = '%s', k = %d%s)", v, CFG$bs_smooth, CFG$k_smooth,
                                       if (is.null(by)) "" else paste0(", by = ", by))
 
@@ -166,9 +216,11 @@ assemble_fig <- function(file, rows, leg, caption, width, height, row_heights = 
   pushViewport(viewport(layout = grid.layout(nr + 2, 2,
                         heights = unit.c(unit(row_heights, "null"), unit(0.5, "in"),
                                          unit(0.17 * length(cap_lines) + 0.2, "in")))))
-  for (i in seq_len(nr)) for (j in seq_along(rows[[i]]))
-    print(rows[[i]][[j]], vp = viewport(layout.pos.row = i,
-                                        layout.pos.col = if (length(rows[[i]]) == 1) 1:2 else j))
+  for (i in seq_len(nr)) for (j in seq_along(rows[[i]])) {
+    vp <- viewport(layout.pos.row = i, layout.pos.col = if (length(rows[[i]]) == 1) 1:2 else j)
+    el <- rows[[i]][[j]]
+    if (inherits(el, "ggplot")) print(el, vp = vp) else { pushViewport(vp); grid.draw(el); popViewport() }   # a plot or a legend
+  }
   if (!is.null(leg)) {
     legs <- if (inherits(leg, "grob")) list(leg) else leg
     for (k in seq_along(legs)) {
@@ -225,6 +277,16 @@ d <- raw %>%
          is.finite(elevation), is.finite(reads), reads > 0,
          is.finite(richness), is.finite(shannon), shannon > 0, is.finite(pielou), is.finite(unmapped_prop),
          !is.na(Alpine))
+
+# Spatial thinning of the data of the alpha gradient models (one random sample per CFG$thin_m metres, within each group):
+# samples that share coordinates (one study / site) are not independent, which makes the curves and p-values overconfident
+if (isTRUE(CFG$thin_alpha) && CFG$thin_m >= 0) {
+  set.seed(7); n0 <- nrow(d)
+  keep <- unlist(lapply(levels(d$Alpine), function(g) { ix <- which(d$Alpine == g); ix[thin_sites(d$lat[ix], d$lon[ix], CFG$thin_m)] }))
+  d <- d[sort(keep), ]
+  message(sprintf("Spatial thinning of the alpha data (one sample per %g m, within each group): %d -> %d samples (alpine %d, lowland %d)",
+                  CFG$thin_m, n0, nrow(d), sum(d$Alpine == "Alpine"), sum(d$Alpine == "Lowland")))
+}
 
 # Pielou J must be strictly in (0, 1) for beta regression (squeeze only if needed)
 if (any(d$pielou <= 0 | d$pielou >= 1)) {
@@ -413,6 +475,7 @@ saveRDS(g, out_a("alpha_full_grid_plot.rds"))
 main_alpha_labels <- resp_lab[CFG$main_alpha_metrics]
 ann_short <- ann %>% mutate(label = sub("Alpine vs lowland shape: ", "", label))
 alpha_panel <- function(gr_label, tag, resp_keep = main_alpha_labels) {
+  show_zones <- gr_label == grad_lab[["glat"]] && !isTRUE(CFG$abs_lat) && length(CFG$lat_breaks) > 0   # zone boundaries of the beta part
   pr <- pred[pred$gradient == gr_label & pred$response %in% resp_keep, ]
   pr$response <- droplevels(pr$response)
   an <- ann_short[ann_short$gradient == gr_label & ann_short$response %in% resp_keep, ]
@@ -423,6 +486,7 @@ alpha_panel <- function(gr_label, tag, resp_keep = main_alpha_labels) {
     geom_line(aes(linetype = spec), linewidth = 1) +
     geom_rug(data = rg, aes(x = x, colour = Alpine), inherit.aes = FALSE,
              sides = "b", alpha = 0.05, length = unit(0.03, "npc")) +
+    (if (show_zones) geom_vline(xintercept = CFG$lat_breaks, linetype = 3, colour = "grey50", linewidth = 0.35)) +
     geom_text(data = an, aes(label = label), x = -Inf, y = Inf, hjust = -0.1, vjust = 1.5,
               size = 3, inherit.aes = FALSE) +
     facet_wrap(~response, nrow = 1, scales = "free_y", labeller = label_wrap_gen(12)) +
@@ -533,12 +597,30 @@ meta <- raw %>%
   filter(is.finite(lon), is.finite(lat), abs(lon) <= 180, abs(lat) <= 90,
          is.finite(elevation), is.finite(log10_reads), is.finite(unmapped), !is.na(Alpine), !is.na(id))
 print(table(group = meta$Alpine))
+meta$zone <- lat_zone(meta$lat)
+print(table(zone = meta$zone, group = meta$Alpine))
 
 ## ---- B1. Replicate subsamples and counts -------------------------------------------------------
+# Each replicate draws, within each group AND latitude zone, up to n_per_group samples in random order such that no two of
+# them are closer than CFG$thin_m metres (and none share coordinates): the pairs then come from different places, not from
+# one site or study, and every zone is represented by a comparable number of samples
+set.seed(99)
+for (g in levels(meta$Alpine)) for (z in zone_names) {
+  ix <- which(meta$Alpine == g & meta$zone == z)
+  if (!length(ix)) { message(sprintf("  %s / %s: no samples", g, z)); next }
+  capped <- length(ix) > 20000                        # counting all the thinned samples is only done for smaller sets
+  n_av <- length(thin_sites(meta$lat[ix], meta$lon[ix], CFG$thin_m, n_max = if (capped) CFG$n_per_group else Inf))
+  message(sprintf("  spatial thinning (one sample per %g m), %s / %s: %s%d of %d samples can be drawn%s", CFG$thin_m, g, z,
+                  if (capped) "at least " else "", n_av, length(ix),
+                  if (n_av < CFG$n_per_group) sprintf(" (fewer than n_per_group = %d: each replicate takes all of them)", CFG$n_per_group) else ""))
+}
 sel <- lapply(seq_len(CFG$n_rep), function(r) {
   set.seed(100 + r)
-  meta %>%
-    group_by(Alpine) %>% slice_sample(n = CFG$n_per_group) %>% ungroup()
+  bind_rows(lapply(levels(meta$Alpine), function(g) bind_rows(lapply(zone_names, function(z) {
+    mg <- meta[meta$Alpine == g & meta$zone == z, ]
+    if (nrow(mg) == 0) return(NULL)
+    mg[thin_sites(mg$lat, mg$lon, CFG$thin_m, n_max = CFG$n_per_group), ]
+  }))))
 })
 all_ids <- unique(unlist(lapply(sel, `[[`, "id")))
 message(length(all_ids), " distinct samples across ", CFG$n_rep, " replicate(s)")
@@ -590,29 +672,51 @@ make_pairs <- function(r) {
   tot <- Matrix::colSums(X)
   ok <- tot >= CFG$rare_depth
   S <- S[ok, ]; X <- X[, ok, drop = FALSE]; tot <- tot[ok]
-  S$hemi <- ifelse(S$lat >= 0, "N", "S")
-  iL <- which(S$Alpine == "Lowland"); iA <- which(S$Alpine == "Alpine")
 
-  # n_pairs random pairs (indices into S). within = TRUE: unordered pairs inside one set
-  draw_pairs <- function(i1, i2, within) {
-    cand <- data.frame(a = sample.int(length(i1), 4 * CFG$n_pairs, replace = TRUE),
-                       b = sample.int(length(i2), 4 * CFG$n_pairs, replace = TRUE))
-    if (within) {
-      cand <- cand[cand$a != cand$b, ]
-      cand <- data.frame(a = pmin(cand$a, cand$b), b = pmax(cand$a, cand$b))
+  # up to n_pairs pairs (indices into S), drawn at random WITHIN strata = geographic distance class x elevation-difference class
+  # (CFG$dist_breaks_km, CFG$elev_breaks_km), the n_pairs shared as evenly as possible over the strata that exist. Random pairs are
+  # mostly thousands of km apart and, among lowland samples, hardly differ in elevation: without stratification short distances
+  # and large elevation differences would hardly be represented. Stratifying on predictors of the models does not bias the fitted
+  # curves; it makes them well determined over the whole range. The natural (unstratified) median distance and elevation difference
+  # of the cell are kept (nat_geo, nat_delev): they are the "typical" values at which other variables are held in the figures.
+  allocate_even <- function(capacity, n) {                 # n over the strata as evenly as possible, never above a stratum's size
+    alloc <- integer(length(capacity)); active <- which(capacity > 0); remaining <- min(n, sum(capacity))
+    while (remaining > 0 && length(active)) {
+      share <- max(remaining %/% length(active), 1L)
+      for (k in active[sample.int(length(active))]) {
+        give <- min(share, capacity[k] - alloc[k], remaining)
+        alloc[k] <- alloc[k] + give; remaining <- remaining - give
+        if (remaining == 0) break
+      }
+      active <- active[alloc[active] < capacity[active]]
     }
-    if (CFG$beta_lat == "hemisphere")      # the latitude difference is defined within a hemisphere: same-hemisphere pairs only
-      cand <- cand[S$hemi[i1[cand$a]] == S$hemi[i2[cand$b]], ]
-    cand <- head(cand[!duplicated(cand), ], CFG$n_pairs)
-    data.frame(i = i1[cand$a], j = i2[cand$b])
+    alloc
   }
-  lab_pairs <- function(d, label) data.frame(group = rep(label, nrow(d)), i = d$i, j = d$j)
-
-  pairs <- bind_rows(lab_pairs(draw_pairs(iL, iL, TRUE),  beta_groups[1]),
-                     lab_pairs(draw_pairs(iA, iA, TRUE),  beta_groups[2]),
-                     lab_pairs(draw_pairs(iA, iL, FALSE), beta_groups[3]))
-  pairs$spec <- "all_pairs"
+  draw_pairs <- function(i1, i2, within) {
+    D <- geosphere::distm(cbind(S$lon[i1], S$lat[i1]), cbind(S$lon[i2], S$lat[i2]), fun = geosphere::distHaversine) / 1000   # km
+    E <- abs(outer(S$elevation[i1], S$elevation[i2], "-"))                                                                     # km
+    idx <- if (within) which(upper.tri(D), arr.ind = TRUE) else which(is.finite(D), arr.ind = TRUE)
+    d <- D[idx]; e <- E[idx]
+    strata <- 100L * cut(d, CFG$dist_breaks_km, labels = FALSE, include.lowest = TRUE) +
+                     cut(e, CFG$elev_breaks_km, labels = FALSE, include.lowest = TRUE)
+    members <- split(seq_along(strata), strata)
+    alloc <- allocate_even(lengths(members), CFG$n_pairs)
+    pick <- unlist(Map(function(ix, k) if (k >= length(ix)) ix else ix[sample.int(length(ix), k)], members, alloc), use.names = FALSE)
+    data.frame(i = i1[idx[pick, 1]], j = i2[idx[pick, 2]], nat_delev = median(e), nat_geo = median(d))
+  }
+  # n_pairs for EACH pair type in EACH latitude zone: both samples of a pair always come from the same zone
+  pl <- list()
+  for (z in zone_names) {
+    iL <- which(S$Alpine == "Lowland" & S$zone == z); iA <- which(S$Alpine == "Alpine" & S$zone == z)
+    one <- function(d, type) if (is.null(d) || !nrow(d)) NULL else data.frame(type = type, zone = z, i = d$i, j = d$j,
+                                                                                   nat_delev = d$nat_delev, nat_geo = d$nat_geo)
+    pl[[length(pl) + 1]] <- one(if (length(iL) > 1) draw_pairs(iL, iL, TRUE), beta_types[1])
+    pl[[length(pl) + 1]] <- one(if (length(iA) > 1) draw_pairs(iA, iA, TRUE), beta_types[2])
+    pl[[length(pl) + 1]] <- one(if (length(iA) > 0 && length(iL) > 0) draw_pairs(iA, iL, FALSE), beta_types[3])
+  }
+  pairs <- bind_rows(pl)
   if (nrow(pairs) == 0) return(NULL)
+  pairs$cell <- paste(pairs$type, pairs$zone, sep = " | ")
 
   # Distances for the drawn pairs only (sparse, vectorised over pairs):
   #   Bray-Curtis on relative abundances p, q:  sum|p - q| / 2  (= 1 - sum min(p, q))
@@ -639,84 +743,129 @@ make_pairs <- function(r) {
 
   pairs$rep_id <- r
   pairs$d_elev <- abs(S$elevation[pairs$i] - S$elevation[pairs$j])
-  # difference in latitude (see CFG$beta_lat): "hemisphere": signed difference of pairs within one hemisphere (max 90);
-  # "absolute": difference of the absolute latitudes (0-90); "signed": signed difference of any pair (0-180)
-  pairs$d_lat  <- switch(CFG$beta_lat,
-                         hemisphere = abs(S$lat[pairs$i] - S$lat[pairs$j]),
-                         absolute   = abs(abs(S$lat[pairs$i]) - abs(S$lat[pairs$j])),
-                         signed     = abs(S$lat[pairs$i] - S$lat[pairs$j]),
-                         stop("CFG$beta_lat must be \"hemisphere\", \"absolute\" or \"signed\""))
-  pairs$hemi   <- ifelse(S$hemi[pairs$i] == S$hemi[pairs$j], S$hemi[pairs$i], "cross")
+  pairs$d_lat  <- abs(S$lat[pairs$i] - S$lat[pairs$j])            # both samples are in the same zone: at most the zone's width
   pairs$geo_km <- geosphere::distHaversine(cbind(S$lon[pairs$i], S$lat[pairs$i]),
                                            cbind(S$lon[pairs$j], S$lat[pairs$j])) / 1000
   pairs$d_depth <- abs(S$log10_reads[pairs$i] - S$log10_reads[pairs$j])   # difference in sequencing depth
   pairs$d_unm   <- abs(S$unmapped[pairs$i] - S$unmapped[pairs$j])          # difference in unmapped proportion
-  pairs[, c("rep_id", "spec", "group", "hemi", "bray", "jaccard", "d_elev", "d_lat", "geo_km", "d_depth", "d_unm")]
+  pairs[, c("rep_id", "cell", "type", "zone", "bray", "jaccard", "d_elev", "d_lat", "geo_km", "d_depth", "d_unm", "nat_delev", "nat_geo")]
 }
 
 ## ---- B3. Models ---------------------------------------------------------------------------------------
-beta_groups  <- c("Within lowland", "Within alpine", "Alpine vs lowland")   # reference = first
+# A "cell" = pair type x latitude zone (e.g. "Within alpine | Northern high latitudes"). Every cell gets its own curves, so
+# zones and pair types can be compared at the same elevation difference, distance, depth and unmapped proportion.
 beta_metrics <- c(bray = "Bray\u2013Curtis", jaccard = "Jaccard (rarefied)")
-beta_vars    <- c(d_elev = "Elevation difference (km)", d_lat = switch(CFG$beta_lat, hemisphere = "Latitude difference within hemisphere (\u00B0)",
-                  absolute = "Difference in absolute latitude (\u00B0)", "Latitude difference (\u00B0)"),
-             log10_geo = "Geographic distance (log10 km)")
-beta_specs   <- c(all_pairs = "Random pairs")
+beta_vars    <- c(d_elev = "Elevation difference (km)", d_lat = "Latitude difference within zone (\u00B0)",
+                  log10_geo = "Geographic distance (log10 km)")
+curve_model  <- c(d_elev = "elev", log10_geo = "elev", d_lat = "lat")      # which model each curve comes from
+cell_levels  <- unlist(lapply(beta_types, function(t) paste(t, zone_names, sep = " | ")))
+zone_lty     <- setNames(c("dotted", "solid", "dashed", "dotdash", "twodash", "longdash")[seq_along(zone_names)], zone_names)
 
-prep_pairs <- function(P, spec) {
-  P <- as.data.frame(P[P$spec == spec, ])
-  # drop comparison types with too few pairs
-  keep <- intersect(beta_groups, names(which(table(P$group) >= CFG$min_pairs)))
-  if (length(setdiff(beta_groups, keep))) message("    dropped (< ", CFG$min_pairs, " pairs): ",
-      paste(setdiff(beta_groups, keep), collapse = ", "))
-  P <- P[P$group %in% keep, ]
-  P$group <- factor(P$group, levels = keep)
-  P$groupO <- factor(P$group, levels = keep, ordered = TRUE)        # reference = first level
+prep_pairs <- function(P) {
+  P <- as.data.frame(P)
+  tab <- P %>% group_by(cell) %>%
+    summarise(n = n(), u = min(n_distinct(round(d_lat, 3)), n_distinct(round(d_elev, 3)), n_distinct(round(geo_km, 3))), .groups = "drop")
+  keep <- tab$cell[tab$n >= CFG$min_pairs & tab$u >= 20]
+  dropped <- setdiff(unique(P$cell), keep)
+  if (length(dropped)) message("    dropped (fewer than ", CFG$min_pairs, " pairs or fewer than 20 distinct values): ", paste(dropped, collapse = "; "))
+  P <- P[P$cell %in% keep, ]
+  P$cell <- factor(P$cell, levels = intersect(cell_levels, keep))
+  P$type <- factor(P$type, levels = beta_types); P$zone <- factor(P$zone, levels = zone_names)
   P$rep_id <- factor(P$rep_id)                                        # replicate: random effect
   P$log10_geo <- log10(pmax(P$geo_km, 0.1))
   P
 }
 
-fit_beta <- function(P, metric) {
+# Two models per metric, as in the figure: (elev) elevation difference accounting for geographic distance;
+# (lat) latitude difference accounting for the elevation difference. Both: curves per cell, depth and unmapped differences,
+# random intercept for the replicate.
+fit_beta <- function(P, metric, kind) {
   n <- nrow(P); P$y <- (P[[metric]] * (n - 1) + 0.5) / n          # squeeze into (0, 1)
-  sm <- unlist(lapply(names(beta_vars), function(v) c(sm1(v), sm1(v, "groupO"))))
-  # nuisance covariates shared by the three comparison types: differences in depth and unmapped proportion
-  terms <- c("group", sm1("d_depth"), sm1("d_unm"), sm)
+  gradient <- if (kind == "elev") c(sm1("d_elev", "cell"), sm1("log10_geo", "cell")) else c(sm1("d_lat", "cell"), sm1("d_elev", "cell"))
+  terms <- c("cell", sm1("d_depth"), sm1("d_unm"), gradient)
   if (nlevels(P$rep_id) > 1) terms <- c(terms, "s(rep_id, bs = 're')")                  # random intercept: replicate
   bam(as.formula(paste("y ~", paste(terms, collapse = " + "))), data = P,
       family = betar(link = "logit"), method = "fREML", discrete = TRUE,
       select = CFG$select, nthreads = CFG$nthreads)
 }
 
-# Partial curve of one pair variable per group (others at group medians), from the pooled model: the replicate
-# random effect is left out (a typical replicate); the ribbon is the model's 95% confidence interval
-predict_var <- function(m, P, v) {
+# Partial curve of one pair variable per cell (the other variables at the cell's medians); the replicate effect is left out
+# (a typical replicate); the ribbon is the model's 95% confidence interval
+predict_curve <- function(m, P, v) {
   excl <- intersect("s(rep_id)", vapply(m$smooth, function(s) s$label, ""))
-  bind_rows(lapply(levels(P$group), function(g) {
-    sub <- P[P$group == g, ]
+  bind_rows(lapply(levels(P$cell), function(cl) {
+    sub <- P[P$cell == cl, ]
     x <- seq(quantile(sub[[v]], .01), quantile(sub[[v]], .99), length.out = 80)
-    nd <- data.frame(group = factor(g, levels = levels(P$group)),
-                     groupO = factor(g, levels = levels(P$group), ordered = TRUE),
-                     d_elev = median(sub$d_elev), d_lat = median(sub$d_lat),
-                     log10_geo = median(sub$log10_geo),
-                     d_depth = median(sub$d_depth), d_unm = median(sub$d_unm),
+    # the other variables are held at the cell's typical (natural, before stratification) elevation difference and distance
+    nd <- data.frame(cell = factor(cl, levels = levels(P$cell)), d_elev = median(sub$nat_delev), d_lat = median(sub$d_lat),
+                     log10_geo = log10(pmax(median(sub$nat_geo), 0.1)), d_depth = median(sub$d_depth), d_unm = median(sub$d_unm),
                      rep_id = factor(levels(P$rep_id)[1], levels = levels(P$rep_id)))
     nd <- nd[rep(1, length(x)), ]; nd[[v]] <- x
     p <- predict(m, nd, type = "link", se.fit = TRUE, exclude = excl, newdata.guaranteed = TRUE, discrete = FALSE)
     li <- family(m)$linkinv
-    data.frame(group = g, x = x, fit = li(p$fit), lo = li(p$fit - 1.96 * p$se.fit), hi = li(p$fit + 1.96 * p$se.fit))
+    data.frame(cell = cl, type = as.character(sub$type[1]), zone = as.character(sub$zone[1]), x = x,
+               fit = li(p$fit), lo = li(p$fit - 1.96 * p$se.fit), hi = li(p$fit + 1.96 * p$se.fit))
   }))
 }
 
-# Binned means of the observed dissimilarities (15 quantile bins per group, all replicates): data check
-bin_obs <- function(P, metric, v)
-  P %>% group_by(group) %>% mutate(bin = ntile(.data[[v]], 15)) %>%
-    group_by(group, bin) %>%
-    summarise(x = mean(.data[[v]]), y = mean(.data[[metric]]), .groups = "drop")
+# STANDARDISED DISSIMILARITY: the dissimilarity two samples of a cell are predicted to have at the SAME geographic distance
+# (CFG$ref_km), the same elevation difference (the typical one of the pair type, equal in all zones), and the same differences
+# in sequencing depth and unmapped proportion (the medians of all pairs). Distance, elevation and depth are what differ between
+# regions otherwise, so this is what lets zones and pair types be compared ("are alpine samples at high latitude more similar
+# to each other than alpine samples in the temperate zone?"). Only where the reference distance lies within the cell's
+# observed range (5-95th percentile). 95% intervals from 2000 draws of the model coefficients; contrasts are differences of
+# those draws (each zone minus the reference zone within a pair type; alpine minus lowland within a zone).
+std_dissim <- function(m, P) {
+  excl <- intersect("s(rep_id)", vapply(m$smooth, function(s) s$label, ""))
+  ref_delev <- tapply(P$nat_delev, P$type, median)      # the typical (natural) elevation difference of each pair type
+  rows <- list()
+  for (cl in levels(P$cell)) {
+    sub <- P[P$cell == cl, ]; rg <- quantile(sub$geo_km, c(0.05, 0.95))
+    for (rk in CFG$ref_km) if (rk >= rg[1] && rk <= rg[2])
+      rows[[length(rows) + 1]] <- data.frame(cell = cl, type = as.character(sub$type[1]), zone = as.character(sub$zone[1]),
+                                             ref_km = rk, n_pairs = nrow(sub), d_elev = unname(ref_delev[as.character(sub$type[1])]))
+  }
+  if (!length(rows)) return(NULL)
+  info <- bind_rows(rows)
+  ref_zone <- if (CFG$ref_zone %in% info$zone) CFG$ref_zone else names(which.max(table(P$zone)))     # the zone the others are compared with
+  nd <- data.frame(cell = factor(info$cell, levels = levels(P$cell)), d_elev = info$d_elev, log10_geo = log10(info$ref_km),
+                   d_depth = median(P$d_depth), d_unm = median(P$d_unm), d_lat = 0,
+                   rep_id = factor(levels(P$rep_id)[1], levels = levels(P$rep_id)))
+  Xp <- predict(m, nd, type = "lpmatrix", exclude = excl, newdata.guaranteed = TRUE, discrete = FALSE)
+  li <- family(m)$linkinv
+  set.seed(1)
+  draws <- li(Xp %*% t(mgcv::rmvn(2000, coef(m), vcov(m))))
+  info$estimate <- as.numeric(li(Xp %*% coef(m)))
+  info$lo <- apply(draws, 1, quantile, 0.025); info$hi <- apply(draws, 1, quantile, 0.975)
 
-# all replicates: the random pairs and their dissimilarities. Saved (beta/pairs_all.rds) and reused on a rerun if the
+  cons <- list()
+  add_con <- function(i1, i2, comparison, label, rk) {
+    dd <- draws[i2, ] - draws[i1, ]
+    cons[[length(cons) + 1]] <<- data.frame(comparison = comparison, contrast = label, ref_km = rk,
+                                            estimate = info$estimate[i2] - info$estimate[i1],
+                                            lo = unname(quantile(dd, 0.025)), hi = unname(quantile(dd, 0.975)),
+                                            share_of_draws_above_0 = mean(dd > 0))
+  }
+  for (rk in unique(info$ref_km)) {
+    ir <- which(info$ref_km == rk)
+    for (ty in beta_types) {                                       # each zone vs the reference zone, within a pair type
+      iz <- ir[info$type[ir] == ty]; i0 <- iz[info$zone[iz] == ref_zone]
+      if (length(i0) == 1) for (i1 in iz[info$zone[iz] != ref_zone])
+        add_con(i0, i1, "zone", sprintf("%s: %s minus %s", ty, info$zone[i1], ref_zone), rk)
+    }
+    for (zz in zone_names) {                                       # alpine vs lowland, within a zone
+      i1 <- ir[info$type[ir] == beta_types[1] & info$zone[ir] == zz]; i2 <- ir[info$type[ir] == beta_types[2] & info$zone[ir] == zz]
+      if (length(i1) == 1 && length(i2) == 1) add_con(i1, i2, "type", sprintf("%s: %s minus %s", zz, beta_types[2], beta_types[1]), rk)
+    }
+  }
+  list(std = info, con = if (length(cons)) bind_rows(cons) else NULL)
+}
+
+# ---- all replicates: the random pairs and their dissimilarities. Saved (beta/pairs_all.rds) and reused on a rerun if the
 # settings and the drawn samples are the same, so a problem in the models does not cost the distance computation again.
-pairs_key <- list(n_rep = CFG$n_rep, n_per_group = CFG$n_per_group, n_pairs = CFG$n_pairs, rare_depth = CFG$rare_depth,
-                  n_ids = length(all_ids), ids_chars = sum(nchar(all_ids)), beta_lat = CFG$beta_lat, test = TEST_MODE)
+pairs_key <- list(dist_breaks = CFG$dist_breaks_km, elev_breaks = CFG$elev_breaks_km, n_rep = CFG$n_rep, n_per_group = CFG$n_per_group, n_pairs = CFG$n_pairs, rare_depth = CFG$rare_depth,
+                  n_ids = length(all_ids), ids_chars = sum(nchar(all_ids)), lat_breaks = CFG$lat_breaks,
+                  zones = zone_names, thin_m = CFG$thin_m, test = TEST_MODE, design = "cells-v3")
 pairs_file <- out_b("pairs_all.rds")
 P_all <- NULL
 if (REUSE_FITS && file.exists(pairs_file)) {
@@ -735,64 +884,57 @@ if (is.null(P_all)) {
   saveRDS(list(key = pairs_key, pairs = P_all), pairs_file)
 }
 
-preds <- list(); obs <- list(); summ <- list(); pair_counts <- list(); beta_raw <- list(); at_one_list <- list()
-for (spec in names(beta_specs)) {
-  P <- prep_pairs(P_all, spec)
-  pair_counts[[spec]] <- P %>% count(rep_id, group, hemi) %>% mutate(spec = spec)
-  # share of pairs with dissimilarity exactly 1 (no shared OTU): a pile at the boundary of a beta regression
-  at_one_list[[spec]] <- bind_rows(lapply(names(beta_metrics), function(mt)
-    P %>% group_by(group) %>% summarise(share_at_1 = mean(.data[[mt]] >= 1 - 1e-12), n_pairs = n(), .groups = "drop") %>%
-      mutate(spec = spec, metric = mt)))
-  beta_raw[[spec]] <- P[, c("group", names(beta_vars), names(beta_metrics))]      # every pair of every replicate (for the plots)
-  message(sprintf("%s: %d pairs from %d replicates", spec, nrow(P), nlevels(P$rep_id)))
-  for (metric in names(beta_metrics)) {
-    message("  fitting ", spec, " / ", metric, " (pooled, random effect: replicate)")
-    m <- tryCatch(fit_beta(P, metric), error = function(e) { message("  FAILED: ", conditionMessage(e)); NULL })
-    if (is.null(m)) next
-    key <- paste(spec, metric)
-    preds[[key]] <- bind_rows(lapply(names(beta_vars), function(v)
-      cbind(spec = spec, metric = metric, variable = v, predict_var(m, P, v))))
-    obs[[key]] <- bind_rows(lapply(names(beta_vars), function(v)
-      cbind(spec = spec, metric = metric, variable = v, bin_obs(P, metric, v))))
-    sm_m <- summary(m)
-    st <- as.data.frame(sm_m$s.table); st$term <- rownames(st)
-    one <- function(x) if (length(x) == 1 && is.numeric(x)) as.numeric(x) else NA_real_     # always exactly one number
-    # standard deviation of the replicate random effect (NA if this mgcv version returns it in another shape)
-    rep_sd <- tryCatch({
-      vc <- gam.vcomp(m, rescale = FALSE)
-      if (is.list(vc) && !is.matrix(vc)) vc <- vc$vc
-      one(if (is.matrix(vc)) vc["s(rep_id)", 1] else vc["s(rep_id)"])
-    }, error = function(e) NA_real_)
-    summ[[key]] <- data.frame(spec = spec, metric = metric, dev_expl = one(sm_m$dev.expl), n_pairs = nrow(P),
-                              replicate_sd = rep_sd, st, check.names = FALSE, stringsAsFactors = FALSE)
-    saveRDS(m, out_b(paste0("model_", spec, "_", metric, ".rds")))
-  }
-}
-at_one <- bind_rows(at_one_list)
+P <- prep_pairs(P_all)
+message(sprintf("%d pairs from %d replicates in %d cells (pair type x latitude zone)", nrow(P), nlevels(P$rep_id), nlevels(P$cell)))
+print(table(cell = P$cell))
+pair_counts <- P %>% count(rep_id, cell, type, zone)
+# share of pairs with dissimilarity exactly 1 (no shared OTU): a pile at the boundary of a beta regression
+at_one <- bind_rows(lapply(names(beta_metrics), function(mt)
+  P %>% group_by(cell) %>% summarise(share_at_1 = mean(.data[[mt]] >= 1 - 1e-12), n_pairs = n(), .groups = "drop") %>% mutate(metric = mt)))
 write.csv(at_one, out_b("share_of_pairs_at_dissimilarity_1.csv"), row.names = FALSE)
-for (i in seq_len(nrow(at_one))) message(sprintf("  %s / %s / %s: %.1f%% of the pairs have dissimilarity exactly 1", at_one$spec[i], at_one$metric[i], at_one$group[i], 100 * at_one$share_at_1[i]))
-if (!length(summ)) stop("no beta model could be fitted: see the FAILED messages above")
-preds <- bind_rows(preds); obs <- bind_rows(obs)
-summ_all <- bind_rows(summ)
-write.csv(summ_all, out_b("models_summary.csv"), row.names = FALSE)   # p-values: descriptive only
+for (i in which(at_one$metric == "bray")) message(sprintf("  %s: %.1f%% of the Bray-Curtis pairs are exactly 1", at_one$cell[i], 100 * at_one$share_at_1[i]))
+write.csv(pair_counts, out_b("pair_counts.csv"), row.names = FALSE)
+beta_raw <- P[, c("cell", "type", "zone", "d_elev", "d_lat", "log10_geo", names(beta_metrics))]   # every pair (for the plots)
 
-# Difference smooths vs the within-lowland reference (pooled model; descriptive: pairs reuse samples)
-pcol <- grep("^p[-.]value$", names(summ_all), value = TRUE)[1]
-beta_tests <- summ_all %>%
-  filter(grepl("groupO", term)) %>%
-  mutate(variable = ifelse(grepl("d_elev", term), "d_elev", ifelse(grepl("d_lat", term), "d_lat", "log10_geo")),
-         contrast = sub(".*groupO", "", term), p = .data[[pcol]]) %>%
-  select(spec, metric, variable, contrast, p)
-write.csv(beta_tests, out_b("group_difference_tests.csv"), row.names = FALSE)
-star_of <- function(p, contrast, which) { v <- p[contrast == which]; if (length(v)) stars(v[1]) else "n/a" }
-beta_label <- function(tt) paste0(" vs within lowland:\n within alpine ", star_of(tt$p, tt$contrast, "Within alpine"),
-                                   " | alpine-lowland ", star_of(tt$p, tt$contrast, "Alpine vs lowland"))
-write.csv(bind_rows(pair_counts), out_b("pair_counts.csv"), row.names = FALSE)
+one <- function(x) if (length(x) == 1 && is.numeric(x)) as.numeric(x) else NA_real_     # always exactly one number
+preds <- list(); summ <- list(); std_list <- list(); con_list <- list()
+for (metric in names(beta_metrics)) for (kind in c("elev", "lat")) {
+  message("  fitting ", metric, " / ", kind, " model (pooled, random effect: replicate)")
+  m <- tryCatch(fit_beta(P, metric, kind), error = function(e) { message("  FAILED: ", conditionMessage(e)); NULL })
+  if (is.null(m)) next
+  key <- paste(metric, kind)
+  preds[[key]] <- bind_rows(lapply(names(curve_model)[curve_model == kind], function(v)
+    cbind(metric = metric, variable = v, predict_curve(m, P, v))))
+  sm_m <- summary(m)
+  st <- as.data.frame(sm_m$s.table); st$term <- rownames(st)
+  rep_sd <- tryCatch({                  # standard deviation of the replicate random effect (NA if returned in another shape)
+    vc <- gam.vcomp(m, rescale = FALSE)
+    if (is.list(vc) && !is.matrix(vc)) vc <- vc$vc
+    one(if (is.matrix(vc)) vc["s(rep_id)", 1] else vc["s(rep_id)"])
+  }, error = function(e) NA_real_)
+  summ[[key]] <- data.frame(metric = metric, model = kind, dev_expl = one(sm_m$dev.expl), n_pairs = nrow(P),
+                            replicate_sd = rep_sd, st, check.names = FALSE, stringsAsFactors = FALSE)
+  if (kind == "elev") {
+    sdz <- tryCatch(std_dissim(m, P), error = function(e) { message("  standardised dissimilarity FAILED: ", conditionMessage(e)); NULL })
+    if (!is.null(sdz)) { std_list[[metric]] <- cbind(metric = metric, sdz$std)
+                         if (!is.null(sdz$con)) con_list[[metric]] <- cbind(metric = metric, sdz$con) }
+  }
+  saveRDS(m, out_b(paste0("model_", metric, "_", kind, ".rds")))
+}
+if (!length(summ)) stop("no beta model could be fitted: see the FAILED messages above")
+preds <- bind_rows(preds)
+write.csv(bind_rows(summ), out_b("models_summary.csv"), row.names = FALSE)      # p-values: descriptive only
 write.csv(preds, out_b("predicted_curves.csv"), row.names = FALSE)
+std_all <- bind_rows(std_list); con_all <- bind_rows(con_list)
+write.csv(std_all, out_b("standardized_dissimilarity.csv"), row.names = FALSE)
+write.csv(con_all, out_b("standardized_contrasts.csv"), row.names = FALSE)
+if (nrow(con_all)) {
+  message("Standardised Bray-Curtis dissimilarity, contrasts (95% interval; > 0 = the first-named group is MORE dissimilar):")
+  cb <- con_all[con_all$metric == "bray", ]
+  for (i in seq_len(nrow(cb))) message(sprintf("  at %g km | %s: %+.3f [%+.3f, %+.3f]", cb$ref_km[i], cb$contrast[i], cb$estimate[i], cb$lo[i], cb$hi[i]))
+}
 
 ## ---- B4. Beta-diversity figures ----------------------------------------------------------------------------------------
-# One panel: one metric against one pair variable (line = pooled model, ribbon = its 95% confidence interval,
-# points = every pair of every replicate, or binned means if CFG$beta_points = "binned")
 # Zoom of the y axis: dissimilarities pile up near 1 with a long tail towards 0, which flattens the curves. The window starts
 # at the lower of the beta_zoom_q quantile of the panel's pairs and the lowest fitted value (minus a margin): pairs below it are
 # not drawn (they are in the models) and a ribbon that runs below it is clipped there, so one badly determined ribbon cannot
@@ -808,128 +950,119 @@ zoom_panel <- function(ob, pm, by) {
   list(ob = out, pm = pm)
 }
 y_breaks <- function(l) { b <- scales::extended_breaks()(l); b[b <= 1 + 1e-9] }                 # dissimilarities cannot exceed 1
-y_scale  <- scale_y_continuous(expand = expansion(mult = c(0.03, 0.28)), breaks = y_breaks)    # headroom for the annotation
-pt_size  <- if (CFG$beta_points == "all") 0.35 else 0.9
-pt_alpha <- if (CFG$beta_points == "all") CFG$beta_point_alpha else 0.6
-pts_txt  <- if (CFG$beta_points == "all") paste0("points = every pair of every replicate (transparent",
-                       if (isTRUE(CFG$beta_zoom)) "; the y axis is zoomed on the bulk of the pairs: the few with a much lower dissimilarity are not drawn and ribbons are clipped at the lower edge, but all pairs are in the models" else "", ")")
-            else "points = binned observed means"
-beta_panel <- function(mt, vv, sp, tag) {
-  sel_rows <- function(d) d[d$spec == sp & d$metric == mt & d$variable == vv, ]
-  pm <- sel_rows(preds)
-  ob <- if (CFG$beta_points == "all") { raw <- beta_raw[[sp]]; data.frame(group = raw$group, x = raw[[vv]], y = raw[[mt]]) }
-        else sel_rows(obs)
+y_scale  <- scale_y_continuous(expand = expansion(mult = c(0.03, 0.06)), breaks = y_breaks)
+thin_txt <- if (CFG$thin_m > 0) sprintf("Samples are spatially thinned: at most one per %g m", CFG$thin_m) else "Samples with identical coordinates are removed (one is kept)"
+pts_note <- if (CFG$beta_points_max > 0) sprintf("points = a random subset of %s pairs (the y axis is zoomed on the bulk of the pairs: the few with a much lower dissimilarity are not drawn and ribbons are clipped at the lower edge, but all pairs are in the models)", format(CFG$beta_points_max, big.mark = ",")) else "pairs not drawn"
+lab_beta <- function(d) {
+  d$metric   <- factor(beta_metrics[d$metric], levels = beta_metrics)
+  d$variable <- factor(beta_vars[d$variable], levels = beta_vars)
+  d
+}
+beta_layers <- function(pm, ob) list(
+  geom_ribbon(data = pm, aes(x, ymin = lo, ymax = hi, fill = type, group = cell), alpha = 0.15),
+  geom_point(data = ob, aes(x, y, colour = type), size = 0.35, alpha = CFG$beta_point_alpha, shape = 16),
+  geom_line(data = pm, aes(x, mid, colour = type, linetype = zone, group = cell), linewidth = 1),
+  scale_colour_manual(values = CFG$cols_beta, name = NULL),
+  scale_fill_manual(values = CFG$cols_beta, guide = "none"),
+  scale_linetype_manual(values = zone_lty, name = NULL),
+  guides(colour = guide_legend(order = 1, override.aes = list(size = 2.5, alpha = 1, linewidth = 1.2, linetype = "solid")),
+         linetype = guide_legend(order = 2, override.aes = list(linewidth = 0.9, colour = "grey30"))))
+
+# One panel: one metric against one pair variable, a curve per cell (colour = pair type, line type = latitude zone)
+beta_curve_panel <- function(metric, v, tag, subtitle) {
+  pm <- preds[preds$metric == metric & preds$variable == v, ]
+  if (!nrow(pm)) return(NULL)
+  ob <- data.frame(type = beta_raw$type, zone = beta_raw$zone, x = beta_raw[[v]], y = beta_raw[[metric]])
+  set.seed(5)
+  ob <- if (CFG$beta_points_max > 0) ob[sample.int(nrow(ob), min(nrow(ob), CFG$beta_points_max)), ] else ob[0, ]
+  for (nm in c("ob", "pm")) { d <- get(nm); d$type <- factor(d$type, levels = beta_types); d$zone <- factor(d$zone, levels = zone_names); assign(nm, d) }
+  pm$mid <- pm$fit; ob$.p <- 1; pm$.p <- 1
+  if (nrow(ob)) { z <- zoom_panel(ob, pm, ".p"); ob <- z$ob; pm <- z$pm }
+  ggplot() + beta_layers(pm, ob) + y_scale +
+    labs(tag = tag, x = beta_vars[[v]], y = paste(beta_metrics[[metric]], "dissimilarity"), subtitle = subtitle) +
+    theme_fig + theme(plot.subtitle = element_text(size = 9, colour = "grey30"))
+}
+
+# Full grid (all metrics x all pair variables): beta/
+{
+  ob <- bind_rows(lapply(names(beta_metrics), function(mt) bind_rows(lapply(names(beta_vars), function(v)
+    data.frame(metric = mt, variable = v, type = beta_raw$type, zone = beta_raw$zone, x = beta_raw[[v]], y = beta_raw[[mt]])))))
+  set.seed(6); if (nrow(ob) > 3 * max(CFG$beta_points_max, 1)) ob <- ob[sample.int(nrow(ob), 3 * max(CFG$beta_points_max, 1)), ]
+  if (CFG$beta_points_max <= 0) ob <- ob[0, ]
+  pm <- lab_beta(preds); ob <- lab_beta(ob)
+  for (nm in c("ob", "pm")) { d <- get(nm); d$type <- factor(d$type, levels = beta_types); d$zone <- factor(d$zone, levels = zone_names); assign(nm, d) }
   pm$mid <- pm$fit
-  for (nm in c("ob", "pm")) {
-    d <- get(nm); d$group <- factor(d$group, levels = beta_groups); assign(nm, d)
-  }
-  ob$.p <- 1; pm$.p <- 1; z <- zoom_panel(ob, pm, ".p"); ob <- z$ob; pm <- z$pm
-  tt <- beta_tests[beta_tests$spec == sp & beta_tests$metric == mt & beta_tests$variable == vv, ]
-  an <- data.frame(label = beta_label(tt))
-  ggplot() +
-    geom_ribbon(data = pm, aes(x, ymin = lo, ymax = hi, fill = group), alpha = 0.25) +
-    geom_point(data = ob, aes(x, y, colour = group), size = pt_size, alpha = pt_alpha, shape = 16) +
-    geom_line(data = pm, aes(x, mid, colour = group), linewidth = 1.2) +
-    geom_text(data = an, aes(label = label), x = -Inf, y = Inf, hjust = 0, vjust = 1.3,
-              size = 3, lineheight = 0.95, inherit.aes = FALSE) +
-    scale_colour_manual(values = CFG$cols_beta, name = NULL) +
-    scale_fill_manual(values = CFG$cols_beta, guide = "none") +
-    guides(colour = guide_legend(override.aes = list(size = 3, alpha = 1, linewidth = 1.2))) +
-    y_scale +
-    labs(tag = tag, x = beta_vars[[vv]], y = paste(beta_metrics[[mt]], "dissimilarity")) +
-    theme_fig
-}
-
-# Full grids (all metrics x all pair variables, one file per pair set), kept in beta/
-for (sp in names(beta_specs)) {
-  pr <- preds %>% filter(spec == sp)
-  ob <- if (CFG$beta_points == "all") {
-    raw <- beta_raw[[sp]]
-    bind_rows(lapply(names(beta_metrics), function(mt) bind_rows(lapply(names(beta_vars), function(v)
-      data.frame(metric = mt, variable = v, group = raw$group, x = raw[[v]], y = raw[[mt]])))))
-  } else obs %>% filter(spec == sp)
-  if (!nrow(pr)) next
-  lab <- function(d) {
-    d$metric   <- factor(beta_metrics[d$metric], levels = beta_metrics)
-    d$variable <- factor(beta_vars[d$variable], levels = beta_vars)
-    d$group    <- factor(d$group, levels = beta_groups)
-    d
-  }
-  pr <- lab(pr); ob <- lab(ob)
-  pm <- pr; pm$mid <- pm$fit
-  z <- zoom_panel(ob, pm, c("metric", "variable")); ob <- z$ob; pm <- z$pm
-  ann_g <- beta_tests %>% filter(spec == sp) %>% group_by(metric, variable) %>%
-    group_modify(~ data.frame(label = beta_label(.x))) %>% ungroup()
-  ann_g$metric   <- factor(beta_metrics[ann_g$metric], levels = beta_metrics)
-  ann_g$variable <- factor(beta_vars[ann_g$variable], levels = beta_vars)
-  g <- ggplot() +
-    geom_ribbon(data = pm, aes(x, ymin = lo, ymax = hi, fill = group), alpha = 0.25) +
-    geom_point(data = ob, aes(x, y, colour = group), size = pt_size, alpha = pt_alpha, shape = 16) +
-    geom_line(data = pm, aes(x, mid, colour = group), linewidth = 1.2) +
-    geom_text(data = ann_g, aes(label = label), x = -Inf, y = Inf, hjust = 0, vjust = 1.3,
-              size = 3, lineheight = 0.95, inherit.aes = FALSE) +
+  if (nrow(ob)) { z <- zoom_panel(ob, pm, c("metric", "variable")); ob <- z$ob; pm <- z$pm }
+  g <- ggplot() + beta_layers(pm, ob) + y_scale +
     facet_grid(metric ~ variable, scales = "free", switch = "both") +
-    scale_colour_manual(values = CFG$cols_beta, name = NULL) +
-    scale_fill_manual(values = CFG$cols_beta, guide = "none") +
-    y_scale +
-    labs(x = NULL, y = "Dissimilarity", title = beta_specs[[sp]]) +
-    guides(colour = guide_legend(override.aes = list(size = 3, alpha = 1, linewidth = 1.2))) +
+    labs(x = NULL, y = "Dissimilarity") +
     theme_bw(base_size = 12) +
-    theme(strip.placement = "outside", strip.background = element_blank(),
-          strip.text = element_text(face = "bold"), panel.grid.minor = element_blank(),
-          legend.position = "bottom")
-  ggsave(out_b(paste0("beta_full_grid_", sp, ".png")), g, width = 12, height = 7, dpi = 300)
+    theme(strip.placement = "outside", strip.background = element_blank(), strip.text = element_text(face = "bold"),
+          panel.grid.minor = element_blank(), legend.position = "bottom")
+  ggsave(out_b("beta_full_grid.png"), g, width = 13, height = 7.5, dpi = 300)
 }
 
-beta_caption <- sprintf(paste(
-  "Dissimilarity between pairs of samples (within lowland, within alpine, between alpine and lowland; pair set: %s) against the difference in elevation",
-  "and in latitude between the two samples. One beta-regression GAM per metric on the pooled pairs of %d replicate subsamples",
-  "(each: %d random samples per group, %d random pairwise distances per comparison type), with a random intercept for the replicate",
-  "and adjusted for geographic distance and for differences in sequencing depth and unmapped proportion: lines = fitted curves,",
-  "ribbons = 95%% confidence intervals of the pooled model, points = binned observed means. Pairs reuse samples, so the intervals and",
-  "the stars (p of the difference smooths vs the within-lowland curve: *** p < 0.001, ** p < 0.01, * p < 0.05, ns) are descriptive",
-  "and optimistic."),
-  beta_specs[[CFG$main_beta_spec]], CFG$n_rep, CFG$n_per_group, CFG$n_pairs)
-beta_caption <- sub("points = binned observed means", pts_txt, beta_caption, fixed = TRUE)
-beta_caption <- sub("and in latitude between the two samples",
-                    switch(CFG$beta_lat,
-                           hemisphere = "and in latitude between the two samples (latitude difference within a hemisphere: only pairs of samples from the same hemisphere)",
-                           absolute   = "and in absolute latitude (distance from the equator) between the two samples",
-                           "and in latitude between the two samples"), beta_caption, fixed = TRUE)
+# Standardised dissimilarity (Figure 2b): the dissimilarity predicted at the SAME geographic distance (columns), the typical
+# elevation difference of the pair type and median depth / unmapped differences, per latitude zone and pair type
+if (nrow(std_all)) {
+  sdp <- std_all
+  sdp$type <- factor(sdp$type, levels = beta_types); sdp$zone <- factor(sdp$zone, levels = zone_names)
+  sdp$metric <- factor(beta_metrics[sdp$metric], levels = beta_metrics)
+  ref_levels <- sprintf("at %s km apart", formatC(sort(unique(sdp$ref_km)), format = "d", big.mark = ","))
+  sdp$ref <- factor(sprintf("at %s km apart", formatC(sdp$ref_km, format = "d", big.mark = ",")), levels = ref_levels)
+  cap2 <- paste("Figure 2b. Dissimilarity between two samples of the same latitude zone, standardised: predicted at the same geographic distance (columns),",
+                "the typical elevation difference of the pair type (the same in all zones) and the median differences in sequencing depth and unmapped",
+                "proportion, from the model of Figure 2C (left). Points = model estimate, bars = 95% interval (descriptive and optimistic: pairs reuse",
+                paste0("samples); shown only where the distance lies within the 5-95th percentile of the cell's pairs. Zones: ", paste(zone_desc, collapse = "; "),
+                       ". ", thin_txt, ". Differences between zones (each minus the reference zone) and pair types with intervals: beta/standardized_contrasts.csv."))
+  g2 <- ggplot(sdp, aes(zone, estimate, colour = type)) +
+    geom_pointrange(aes(ymin = lo, ymax = hi), position = position_dodge(width = 0.6), size = 0.5, linewidth = 0.8) +
+    facet_grid(metric ~ ref, scales = "free_y", switch = "y") +
+    scale_colour_manual(values = CFG$cols_beta, name = NULL) +
+    scale_x_discrete(labels = scales::label_wrap(14), drop = FALSE) +
+    labs(x = NULL, y = "Standardised dissimilarity", caption = paste(strwrap(cap2, 130), collapse = "\n")) +
+    theme_bw(base_size = 12) +
+    theme(strip.placement = "outside", strip.background = element_blank(), strip.text = element_text(face = "bold"),
+          panel.grid.minor = element_blank(), legend.position = "bottom", plot.caption = element_text(hjust = 0, size = 8.5))
+  ggsave(file.path(out_folder, "fig2b_standardized_dissimilarity.png"), g2, width = 11, height = 7.5, dpi = 300)
+}
 
 # Supplementary Figure 1: Jaccard (rarefied presence/absence)
-pS1A <- beta_panel("jaccard", "d_elev", CFG$main_beta_spec, "A")
-pS1B <- beta_panel("jaccard", "d_lat",  CFG$main_beta_spec, "B")
-assemble_fig(file.path(out_folder, "figS1_beta_jaccard.png"), list(list(pS1A, pS1B)),
-             get_legend(pS1A), paste("Supplementary Figure 1.", beta_caption), 12, 5.6)
+pS1A <- beta_curve_panel("jaccard", "d_elev", "A", "accounting for geographic distance")
+pS1B <- beta_curve_panel("jaccard", "d_lat", "B", "accounting for the elevation difference")
+if (!is.null(pS1A) && !is.null(pS1B)) {
+  s1_caption <- paste(paste0("Supplementary Figure 1. Jaccard (rarefied presence/absence) dissimilarity between pairs of samples from the same latitude zone (",
+                      paste(zone_desc, collapse = "; "), ")"), "against the difference in elevation (A; accounting for geographic distance) and in latitude (B; accounting for the elevation difference);",
+                      "colour = pair type, line type = latitude zone; one beta-regression GAM per panel on the pooled pairs of", CFG$n_rep,
+                      "replicates with a random intercept for the replicate; lines = fitted curves, ribbons = 95% confidence intervals (descriptive and optimistic),", paste0(pts_note, "."), paste0(thin_txt, "."))
+  assemble_fig(file.path(out_folder, "figS1_beta_jaccard.png"), list(list(pS1A, pS1B)), get_legend(pS1A), s1_caption, 14, 6.5)
+}
 
 }  # end RUN_BETA
 
 ## ======================= MAIN FIGURE (needs both parts) =====================================
+# A: alpha diversity along elevation (row 1); B: along latitude (row 2); C: Bray-Curtis dissimilarity against the elevation
+# difference (accounting for geographic distance) and the latitude difference (accounting for elevation), by zone and pair type
 if (RUN_ALPHA && RUN_BETA) {
   pA <- alpha_panel(grad_lab[["elevation"]], "A")
   pB <- alpha_panel(grad_lab[["glat"]], "B")
-  pC <- beta_panel("bray", "d_elev", CFG$main_beta_spec, "C")
-  pD <- beta_panel("bray", "d_lat",  CFG$main_beta_spec, "D")
+  pC <- beta_curve_panel("bray", "d_elev", "C", "accounting for geographic distance")
+  pD <- beta_curve_panel("bray", "d_lat", "", "accounting for the elevation difference")
+  if (is.null(pC) || is.null(pD)) stop("main figure: the Bray-Curtis models are missing")
   main_caption <- paste(
-    "A, B: alpha diversity along elevation (A) and latitude (B); GAM partial effects adjusted for sequencing depth and unmapped proportion, solid = net of space",
-    "(95% CI), dashed = no spatial term; stars = test that the alpine gradient differs in shape from the lowland",
-    "one (net model; *** p < 0.001, ** p < 0.01, * p < 0.05, ns). C, D: Bray-Curtis dissimilarity between pairs of samples (within lowland, within alpine, between alpine and lowland) against the",
-    sprintf("difference in elevation (C) and latitude (D); one model on the pooled pairs of %d replicate subsamples (each: %d random samples per group,",
-            CFG$n_rep, CFG$n_per_group),
-    sprintf("%d random pairwise distances per comparison type) with a random intercept for the replicate; lines = fitted curves, ribbons = 95%% confidence intervals, points = binned observed means.",
-            CFG$n_pairs),
-    "Stars in C, D: p of the difference smooths vs within lowland (descriptive and optimistic: pairs reuse samples).",
-    "Jaccard: Supplementary Figure 1.")
-  main_caption <- sub("points = binned observed means", pts_txt, main_caption, fixed = TRUE)
-  main_caption <- sub("elevation (C) and latitude (D)",
-                      switch(CFG$beta_lat,
-                             hemisphere = "elevation (C) and latitude (D; within a hemisphere, pairs of samples from the same hemisphere only)",
-                             absolute   = "elevation (C) and in absolute latitude (D)",
-                             "elevation (C) and latitude (D)"), main_caption, fixed = TRUE)
+    "A, B: alpha diversity (observed OTUs, Shannon index, Pielou J) along elevation (A) and latitude (B; dotted vertical lines = the zone boundaries used in C); GAM partial effects",
+    "adjusted for sequencing depth and unmapped proportion, solid = net of space (95% CI), dashed = no spatial term; stars = test that the alpine gradient differs in shape from the",
+    "lowland one (net model; *** p < 0.001, ** p < 0.01, * p < 0.05, ns).",
+    paste0("C: Bray-Curtis dissimilarity between pairs of samples from the same latitude zone (", paste(zone_desc, collapse = "; "), ") against the difference in elevation"),
+    "(left; accounting for geographic distance) and the difference in latitude (right; accounting for the elevation difference); colour = pair type (within lowland, within alpine,",
+    "between alpine and lowland), line type = latitude zone.",
+    sprintf("Each replicate subsample draws up to %d samples per group and zone and up to %d pairs per pair type and zone (random within classes of geographic distance and elevation difference); the pairs of %d replicates are pooled in one beta-regression GAM per panel with a random intercept for the replicate; lines = fitted curves, ribbons = 95%% confidence intervals (descriptive and optimistic: pairs reuse samples),",
+            CFG$n_per_group, CFG$n_pairs, CFG$n_rep), paste0(pts_note, "."),
+    paste0(thin_txt, " (in every replicate subsample of C", if (isTRUE(CFG$thin_alpha)) " and in the data of A, B" else "", ")."),
+    "Dissimilarity standardised for distance and compared between zones: Figure 2b. Jaccard: Supplementary Figure 1.")
   assemble_fig(file.path(out_folder, "fig2_alpha_beta_gradients.png"),
-               list(list(pA, pB), list(pC, pD)), list(get_legend(pA), get_legend(pC)), main_caption,
-               width = 14, height = 10.5, row_heights = c(1.1, 1))
+               list(list(pA), list(pB), list(get_legend(pA)), list(pC, pD)), get_legend(pC), main_caption,
+               width = 14, height = 16, row_heights = c(1, 1, 0.17, 1.5))
   saveRDS(list(A = pA, B = pB, C = pC, D = pD), file.path(out_folder, "fig2_panels.rds"))
 } else message("Main figure skipped: it needs RUN_ALPHA and RUN_BETA both TRUE.")
 
