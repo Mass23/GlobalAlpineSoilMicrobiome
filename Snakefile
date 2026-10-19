@@ -27,7 +27,7 @@ FILTERED_BIOM = f"{DATA}/microbeatlas/otuTable_soilCurated_OTU97_nextMAPrelease_
 ALL_DATA_CSV = f"{RESULTS}/all_sampled_data.csv"
 
 # the flag files below are written by the analysis scripts themselves, inside the folder they are given
-DONE_1 = f"{RESULTS}/1_alpha_overview/fig1_panels.rds"
+DONE_1 = f"{RESULTS}/1_alpha_overview/.done"
 DONE_2 = f"{RESULTS}/2_alpha_beta_elevation_latitude/.done"
 
 rule all:

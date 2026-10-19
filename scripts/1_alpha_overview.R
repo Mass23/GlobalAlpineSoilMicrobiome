@@ -44,6 +44,13 @@ CFG <- list(
   k_smooth    = 5,              # basis dimension of every 1-D smooth: small = smooth curves
   bs_smooth   = "ts",           # thin plate spline WITH shrinkage (the null space is penalised too)
   select      = FALSE,          # TRUE would add a second shrinkage penalty on top of "ts"
+  thin_m      = 100,            # a LOCATION = samples within this radius (metres)
+  alpha_cluster_alpine  = "re",   # MODELS: samples that share a location are not independent. ALPINE group: "re" = keep every sample and
+                                  #   give each location a random intercept; "thin" = one sample per location; "none"
+  alpha_cluster_lowland = "thin", # LOWLAND group: "thin" = one sample per location (data-rich; a random effect with ~100k levels is not
+                                  #   feasible in mgcv); "re" = random intercept per re_cell_deg cell; "none"
+  re_cell_deg   = 1,              # size (degrees) of the cells of the lowland random effect
+  max_re_levels = 3000,           # safety: a random effect may have at most this many levels (the cost grows steeply with the levels)
   n_plot_lowland = 20000,       # lowland points drawn behind the GAM curves (plot only)
   fig_width   = 13,             # inches
   row_heights = c(6, 4.2, 3.8), # inches: map | B, C | D, E
@@ -51,6 +58,44 @@ CFG <- list(
   cols        = c(Lowland = "#7C9885", Alpine = "#2B6CB0")   # greyish green vs blue
 )
 set.seed(1)
+
+# Spatial thinning: keep one randomly chosen sample per `radius_m` metres (greedy, in random order; radius 0 = distinct coordinates
+# only). Exact great-circle neighbourhoods (3D coordinates, a hash of cells of the radius size).
+thin_sites <- function(lat, lon, radius_m, n_max = Inf) {
+  n <- length(lat); ord <- sample.int(n); r <- max(radius_m, 0); cell <- max(r, 1); R <- 6371008.8
+  la <- lat * pi / 180; lo <- lon * pi / 180
+  X <- R * cos(la) * cos(lo); Y <- R * cos(la) * sin(lo); Z <- R * sin(la)
+  cx <- floor(X / cell); cy <- floor(Y / cell); cz <- floor(Z / cell)
+  off <- 2^17; key <- function(a, b, c) sprintf("%.0f", (a + off) + 2^19 * (b + off) + 2^38 * (c + off))
+  nb <- as.matrix(expand.grid(-1:1, -1:1, -1:1))
+  seen <- new.env(hash = TRUE, parent = emptyenv()); keep <- integer(0)
+  for (i in ord) {
+    js <- unlist(mget(key(cx[i] + nb[, 1], cy[i] + nb[, 2], cz[i] + nb[, 3]), envir = seen, ifnotfound = list(NULL)), use.names = FALSE)
+    if (length(js) && any((X[js] - X[i])^2 + (Y[js] - Y[i])^2 + (Z[js] - Z[i])^2 <= r^2)) next
+    k <- key(cx[i], cy[i], cz[i]); seen[[k]] <- c(seen[[k]], i); keep[length(keep) + 1L] <- i
+    if (length(keep) >= n_max) break
+  }
+  keep
+}
+# Location clusters: samples within `radius_m` metres of an earlier one share its cluster. Returns an integer cluster id per sample.
+cluster_sites <- function(lat, lon, radius_m) {
+  n <- length(lat); r <- max(radius_m, 0); cell <- max(r, 1); R <- 6371008.8
+  la <- lat * pi / 180; lo <- lon * pi / 180
+  X <- R * cos(la) * cos(lo); Y <- R * cos(la) * sin(lo); Z <- R * sin(la)
+  cx <- floor(X / cell); cy <- floor(Y / cell); cz <- floor(Z / cell)
+  off <- 2^17; key <- function(a, b, c) sprintf("%.0f", (a + off) + 2^19 * (b + off) + 2^38 * (c + off))
+  nb <- as.matrix(expand.grid(-1:1, -1:1, -1:1))
+  seen <- new.env(hash = TRUE, parent = emptyenv()); id <- integer(n); k <- 0L
+  for (i in seq_len(n)) {
+    js <- unlist(mget(key(cx[i] + nb[, 1], cy[i] + nb[, 2], cz[i] + nb[, 3]), envir = seen, ifnotfound = list(NULL)), use.names = FALSE)
+    if (length(js)) {
+      d2 <- (X[js] - X[i])^2 + (Y[js] - Y[i])^2 + (Z[js] - Z[i])^2; j <- which.min(d2)
+      if (d2[j] <= r^2) { id[i] <- id[js[j]]; next }
+    }
+    k <- k + 1L; id[i] <- k; kk <- key(cx[i], cy[i], cz[i]); seen[[kk]] <- c(seen[[kk]], i)
+  }
+  id
+}
 
 ## ---- 1. Data -------------------------------------------------------------------
 # The sample table is a TSV without quoting (its text fields contain commas): read it with quote = "" so that
@@ -117,7 +162,45 @@ pA <- ggplot() +
 ## ---- 3. Models (panels B, D, E) ---------------------------------------------------------
 # Modelling data: finite unmapped proportion, positive richness and Shannon
 dm <- d %>% filter(is.finite(unmapped_prop), richness > 0, shannon > 0)
-message(nrow(dm), " samples in the models")
+
+# Samples that share a location (within CFG$thin_m metres: one study / site) are not independent: left alone they make the curves and
+# p-values overconfident. Per group: "re" = keep every sample and give each location a random intercept (the effective number of
+# independent units is then the number of locations); "thin" = keep one random sample per location; "none" = nothing.
+# (The map and the box plots use all samples.)
+alpha_how <- c(Alpine = CFG$alpha_cluster_alpine, Lowland = CFG$alpha_cluster_lowland)
+if (!all(alpha_how %in% c("re", "thin", "none"))) stop('CFG$alpha_cluster_alpine / _lowland must be "re", "thin" or "none"')
+set.seed(7); n0 <- nrow(dm); dm$re_loc <- NA_character_; keep_rows <- rep(TRUE, nrow(dm))
+for (g in levels(dm$Alpine)) {
+  ix <- which(dm$Alpine == g)
+  if (alpha_how[[g]] == "thin") {
+    keep_rows[ix] <- FALSE; keep_rows[ix[thin_sites(dm$lat[ix], dm$lon[ix], CFG$thin_m)]] <- TRUE
+  } else if (alpha_how[[g]] == "re") {
+    id <- if (g == "Alpine") cluster_sites(dm$lat[ix], dm$lon[ix], CFG$thin_m) else {
+      cs <- CFG$re_cell_deg
+      repeat {                                      # coarsen the cells until the random effect is affordable
+        key <- paste(floor(dm$lat[ix] / cs), floor(dm$lon[ix] / cs))
+        if (length(unique(key)) <= CFG$max_re_levels || cs > 40) break
+        cs <- cs * 2
+      }
+      if (cs != CFG$re_cell_deg) message(sprintf("  lowland random effect: cells coarsened to %g degrees (max_re_levels = %d)", cs, CFG$max_re_levels))
+      match(key, unique(key))
+    }
+    dm$re_loc[ix] <- paste0(substr(g, 1, 1), id)
+  }
+}
+dm <- dm[keep_rows, ]
+dm$re_ind <- as.numeric(!is.na(dm$re_loc))            # 1 = this row has a location random effect, 0 = it has none (thinned or "none")
+use_re <- sum(dm$re_ind) > 0
+dm$re_loc <- if (use_re) { f <- factor(dm$re_loc); f[is.na(f)] <- levels(f)[1]; f } else factor(rep("none", nrow(dm)))
+if (use_re && nlevels(dm$re_loc) > CFG$max_re_levels)
+  stop(sprintf("the location random effect has %d levels (> max_re_levels = %d): thin that group (alpha_cluster_* = \"thin\") or raise max_re_levels",
+               nlevels(dm$re_loc), CFG$max_re_levels))
+re_rhs <- if (use_re) "+ s(re_loc, bs = 're', by = re_ind)" else ""         # label: s(re_loc):re_ind
+re_labels <- "s(re_loc):re_ind"
+excl_for <- function(m) intersect(c("s(lat,lon)", re_labels), vapply(m$smooth, function(s) s$label, ""))   # no spatial term, no location effect
+message(sprintf("%d samples in the models (of %d): alpine %d, lowland %d; location random effect with %d levels (alpine: %s, lowland: %s)",
+                nrow(dm), n0, sum(dm$Alpine == "Alpine"), sum(dm$Alpine == "Lowland"), if (use_re) nlevels(dm$re_loc) else 0L,
+                alpha_how[["Alpine"]], alpha_how[["Lowland"]]))
 
 fam <- list(richness = nb(), shannon = Gamma(link = "log"))
 resp_lab <- c(richness = "Observed OTUs", shannon = "Shannon index")
@@ -127,7 +210,7 @@ resp_lab <- c(richness = "Observed OTUs", shannon = "Shannon index")
 sm1 <- function(v, by = NULL) sprintf("s(%s, bs = '%s', k = %d%s)", v, CFG$bs_smooth, CFG$k_smooth,
                                       if (is.null(by)) "" else paste0(", by = ", by))
 base_rhs <- paste("Alpine +", sm1("log10_reads"), "+", sm1("log10_reads", "AlpineO"),
-                  sprintf("+ s(lat, lon, bs = 'sos', k = %d)", CFG$k_space))
+                  sprintf("+ s(lat, lon, bs = 'sos', k = %d)", CFG$k_space), re_rhs)
 rhs_u <- c(m0  = base_rhs,                                                    # space + depth
            m1  = paste(base_rhs, "+", sm1("unmapped_prop")),                  # + unmapped (common)
            m1g = paste(base_rhs, "+", sm1("unmapped_prop"),                   # + unmapped (per group)
@@ -169,7 +252,8 @@ grid_depth <- bind_rows(lapply(levels(dm$Alpine), function(a) {
              log10_reads = seq(quantile(x, .01), quantile(x, .99), length.out = 100))
 }))
 grid_depth$lat <- median(dm$lat); grid_depth$lon <- median(dm$lon)    # spatial term is excluded
-pr <- predict(m0, grid_depth, type = "link", se.fit = TRUE, exclude = "s(lat,lon)",
+grid_depth$re_loc <- factor(levels(dm$re_loc)[1], levels = levels(dm$re_loc)); grid_depth$re_ind <- 0   # so is the location effect
+pr <- predict(m0, grid_depth, type = "link", se.fit = TRUE, exclude = excl_for(m0),
               newdata.guaranteed = TRUE, discrete = FALSE)
 li <- family(m0)$linkinv
 grid_depth$reads <- 10^grid_depth$log10_reads
@@ -251,8 +335,9 @@ pred_unm <- function(resp) {
     nd <- data.frame(Alpine  = factor(a, levels = levels(dm$Alpine)),
                      AlpineO = factor(a, levels = levels(dm$Alpine), ordered = TRUE),
                      unmapped_prop = seq(quantile(x, .01), quantile(x, .99), length.out = 100),
-                     log10_reads = median(dm$log10_reads), lat = median(dm$lat), lon = median(dm$lon))
-    p <- predict(m, nd, type = "link", se.fit = TRUE, exclude = "s(lat,lon)", newdata.guaranteed = TRUE, discrete = FALSE)
+                     log10_reads = median(dm$log10_reads), lat = median(dm$lat), lon = median(dm$lon),
+                     re_loc = factor(levels(dm$re_loc)[1], levels = levels(dm$re_loc)), re_ind = 0)
+    p <- predict(m, nd, type = "link", se.fit = TRUE, exclude = excl_for(m), newdata.guaranteed = TRUE, discrete = FALSE)
     li <- family(m)$linkinv
     data.frame(response = resp_lab[[resp]], Alpine = nd$Alpine, x = nd$unmapped_prop,
                fit = li(p$fit), lo = li(p$fit - 1.96 * p$se.fit), hi = li(p$fit + 1.96 * p$se.fit))
