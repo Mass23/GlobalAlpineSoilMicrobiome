@@ -50,6 +50,9 @@ CFG <- list(
   alpha_cluster_lowland = "thin", # LOWLAND group: "thin" = one sample per location (data-rich; a random effect with ~100k levels is not
                                   #   feasible in mgcv); "re" = random intercept per re_cell_deg cell; "none"
   re_cell_deg   = 1,              # size (degrees) of the cells of the lowland random effect
+  re_bioproject = TRUE,           # random intercept per NCBI BioProject (study): samples of one study share protocols, primers and sequencing
+                                  #   and are not independent. Needs the column `bioproject` (microbeatlas_filter_data.R)
+  min_project_n = 5,              # BioProjects with fewer samples (in the model data) share ONE level, as do samples without a BioProject
   max_re_levels = 3000,           # safety: a random effect may have at most this many levels (the cost grows steeply with the levels)
   n_plot_lowland = 20000,       # lowland points drawn behind the GAM curves (plot only)
   fig_width   = 13,             # inches
@@ -197,6 +200,29 @@ if (use_re && nlevels(dm$re_loc) > CFG$max_re_levels)
                nlevels(dm$re_loc), CFG$max_re_levels))
 re_rhs <- if (use_re) "+ s(re_loc, bs = 're', by = re_ind)" else ""         # label: s(re_loc):re_ind
 re_labels <- "s(re_loc):re_ind"
+
+# Random intercept per BioProject (crossed with the location effect): studies differ in protocol, primers and sequencing platform, so
+# samples of one study resemble each other whatever their location. BioProjects with fewer than min_project_n samples, and samples
+# without a BioProject, share one level; if there are still more than max_re_levels projects the smallest ones are pooled as well
+# (the cost of a random effect grows steeply with its number of levels).
+use_study <- isTRUE(CFG$re_bioproject) && "bioproject" %in% names(dm)
+if (isTRUE(CFG$re_bioproject) && !use_study) message("  no column 'bioproject' in the sample table: no study random effect (run microbeatlas_filter_data.R first)")
+if (use_study) {
+  bp <- as.character(dm$bioproject); bp[is.na(bp) | !nzchar(bp)] <- "unknown"
+  tb <- table(bp)
+  bp[bp %in% c(names(tb)[tb < CFG$min_project_n], "unknown")] <- "pooled_small_or_unknown"
+  tb <- sort(table(bp[bp != "pooled_small_or_unknown"]), decreasing = TRUE)
+  if (length(tb) > CFG$max_re_levels - 1) {
+    bp[bp %in% names(tb)[seq(CFG$max_re_levels, length(tb))]] <- "pooled_small_or_unknown"
+    message(sprintf("  study random effect: the %d smallest BioProjects are pooled as well (max_re_levels = %d)", length(tb) - (CFG$max_re_levels - 1), CFG$max_re_levels))
+  }
+  dm$re_study <- factor(bp)
+  re_rhs <- paste(re_rhs, "+ s(re_study, bs = 're')"); re_labels <- c(re_labels, "s(re_study)")
+  big <- sort(table(bp[bp != "pooled_small_or_unknown"]), decreasing = TRUE)
+  message(sprintf("Study random effect: %d levels (%d BioProjects with >= %d samples + one pooled level holding %.1f%% of the samples); largest projects: %s",
+                  nlevels(dm$re_study), length(big), CFG$min_project_n, 100 * mean(bp == "pooled_small_or_unknown"),
+                  paste(sprintf("%s (%.1f%%)", names(head(big, 4)), 100 * as.integer(head(big, 4)) / nrow(dm)), collapse = ", ")))
+} else dm$re_study <- factor(rep("none", nrow(dm)))
 excl_for <- function(m) intersect(c("s(lat,lon)", re_labels), vapply(m$smooth, function(s) s$label, ""))   # no spatial term, no location effect
 message(sprintf("%d samples in the models (of %d): alpine %d, lowland %d; location random effect with %d levels (alpine: %s, lowland: %s)",
                 nrow(dm), n0, sum(dm$Alpine == "Alpine"), sum(dm$Alpine == "Lowland"), if (use_re) nlevels(dm$re_loc) else 0L,
@@ -222,8 +248,9 @@ fit_gam <- function(resp, rhs)
 
 fits_u <- list()
 for (resp in names(fam)) for (mm in names(rhs_u)) {
-  key <- paste(resp, mm, sep = "__"); message("Fitting ", key)
+  key <- paste(resp, mm, sep = "__"); t_fit <- Sys.time()
   fits_u[[key]] <- fit_gam(resp, rhs_u[[mm]])
+  message(sprintf("Fitted %s in %.1f min", key, as.numeric(difftime(Sys.time(), t_fit, units = "mins"))))
 }
 saveRDS(fits_u, file.path(out_folder, "fig1_gam_fits.rds"))
 writeLines(unlist(lapply(names(fits_u), function(k)
@@ -253,6 +280,7 @@ grid_depth <- bind_rows(lapply(levels(dm$Alpine), function(a) {
 }))
 grid_depth$lat <- median(dm$lat); grid_depth$lon <- median(dm$lon)    # spatial term is excluded
 grid_depth$re_loc <- factor(levels(dm$re_loc)[1], levels = levels(dm$re_loc)); grid_depth$re_ind <- 0   # so is the location effect
+grid_depth$re_study <- factor(levels(dm$re_study)[1], levels = levels(dm$re_study))                         # and the study effect
 pr <- predict(m0, grid_depth, type = "link", se.fit = TRUE, exclude = excl_for(m0),
               newdata.guaranteed = TRUE, discrete = FALSE)
 li <- family(m0)$linkinv
@@ -336,7 +364,8 @@ pred_unm <- function(resp) {
                      AlpineO = factor(a, levels = levels(dm$Alpine), ordered = TRUE),
                      unmapped_prop = seq(quantile(x, .01), quantile(x, .99), length.out = 100),
                      log10_reads = median(dm$log10_reads), lat = median(dm$lat), lon = median(dm$lon),
-                     re_loc = factor(levels(dm$re_loc)[1], levels = levels(dm$re_loc)), re_ind = 0)
+                     re_loc = factor(levels(dm$re_loc)[1], levels = levels(dm$re_loc)), re_ind = 0,
+                     re_study = factor(levels(dm$re_study)[1], levels = levels(dm$re_study)))
     p <- predict(m, nd, type = "link", se.fit = TRUE, exclude = excl_for(m), newdata.guaranteed = TRUE, discrete = FALSE)
     li <- family(m)$linkinv
     data.frame(response = resp_lab[[resp]], Alpine = nd$Alpine, x = nd$unmapped_prop,
