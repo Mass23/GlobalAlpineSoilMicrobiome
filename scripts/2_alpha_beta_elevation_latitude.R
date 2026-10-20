@@ -62,6 +62,10 @@
 #   in several replicates). The random effect for the replicate does not remove that dependence, so the intervals are
 #   descriptive and optimistic; judge robustness by the size of the effects and their consistency.
 #
+# ALPHA GRADIENT AXES (gradient_axes): "raw" (default) = elevation and latitude; the sensitivity analysis "normalised" (elevation and latitude as
+#   residuals against a lat/lon surface / an elevation relation) reruns the alpha part only, into <out_folder>_axes_normalised.
+#   alpha/concurvity.csv says how well elevation, latitude and the spatial spline can be told apart.
+#
 # FIGURES (in <out_folder>)
 #   fig2_alpha_beta_gradients.png : A = alpha diversity vs elevation (3 metrics), B = vs latitude (signed),
 #                                   C = Bray-Curtis vs elevation difference (accounting for space) and vs latitude
@@ -133,6 +137,12 @@ CFG <- list(
   thin_alpine   = FALSE,          # thin a group to one random sample per location BEFORE modelling (cheaper, but discards samples): alpine ...
   thin_lowland  = TRUE,           # ... and lowland (data-rich: thinning costs little)
   max_re_levels = 3000,           # safety: the random effect may have at most this many levels (the cost grows steeply with the levels)
+  gradient_axes = "raw",        # x axes of the ALPHA gradients (Figure 2A, B): "raw" = elevation and latitude; "normalised" = elevation as the residual
+                                #   of a lat/lon surface, latitude as the residual of an elevation relation (a SENSITIVITY analysis: alpha part
+                                #   only, results in <out_folder>_axes_normalised)
+  k_norm        = 30,           # basis dimension of the lat/lon surface (elevation baseline of "normalised")
+  concurvity    = TRUE,         # table of how well elevation, latitude and the spatial spline can be predicted from each other (alpha/concurvity.csv)
+  concurvity_n  = 15000,        # rows of the random sample on which the concurvity is computed
   k_space     = 60,             # basis dimension of the sos spatial spline
   k_space_alpine = 30,          # Supplementary Figure 3: basis dimension of the alpine-specific surface
   grid_res    = 2,              # Supplementary Figure 3: grid resolution (degrees)
@@ -167,6 +177,12 @@ CFG <- list(
 if (TEST_MODE) {
   CFG$n_per_group <- 200; CFG$n_rep <- 1; CFG$n_pairs <- 300
   out_folder <- paste0(out_folder, "_TEST")
+}
+if (!CFG$gradient_axes %in% c("raw", "normalised")) stop('CFG$gradient_axes must be "raw" or "normalised"')
+if (CFG$gradient_axes != "raw") {                      # a sensitivity analysis of the alpha gradients: its own folder, no beta part
+  out_folder <- paste0(out_folder, "_axes_", CFG$gradient_axes)
+  message("gradient_axes = '", CFG$gradient_axes, "': sensitivity analysis of the alpha gradients only (the beta part is not run); results in ", out_folder)
+  RUN_BETA <- FALSE
 }
 dir.create(file.path(out_folder, "alpha"), recursive = TRUE, showWarnings = FALSE)
 dir.create(file.path(out_folder, "beta"),  recursive = TRUE, showWarnings = FALSE)
@@ -321,6 +337,24 @@ d <- raw %>%
          is.finite(richness), is.finite(shannon), shannon > 0, is.finite(pielou), is.finite(unmapped_prop),
          !is.na(Alpine))
 
+# ---- x axes of the alpha gradients ------------------------------------------------------------------------------------------------------
+# "raw": elevation (km) and latitude. Elevation and latitude are not independent in the data (high samples are at some latitudes), and
+# both are tied to space, so the effect of one can carry the other. A sensitivity analysis (own output folder):
+#  * "normalised": elevation minus the elevation expected from a smooth lat/lon surface of the sampled elevations (local relief
+#    relative to the region), and latitude minus the latitude expected at that elevation. The baselines are fitted to these samples,
+#    so alpine samples help define them: a sensitivity analysis, not a replacement of the raw axes.
+d$elevation_raw <- d$elevation; d$glat_raw <- d$glat
+if (CFG$gradient_axes == "normalised") {
+  fe <- bam(elevation_raw ~ s(lat, lon, bs = "sos", k = CFG$k_norm), data = d, method = "fREML", discrete = TRUE, nthreads = CFG$nthreads)
+  d$elevation <- as.numeric(d$elevation_raw - fitted(fe))
+  fl <- bam(glat_raw ~ s(elevation_raw, bs = "ts", k = 8), data = d, method = "fREML", discrete = TRUE, nthreads = CFG$nthreads)
+  d$glat <- as.numeric(d$glat_raw - fitted(fl))
+  message(sprintf("normalised axes: the lat/lon surface explains %.0f%% of the variance of elevation, elevation explains %.0f%% of that of latitude; correlation of the normalised with the raw axis: elevation %.2f, latitude %.2f",
+                  100 * summary(fe)$r.sq, 100 * summary(fl)$r.sq, cor(d$elevation, d$elevation_raw), cor(d$glat, d$glat_raw)))
+}
+axes_txt <- switch(CFG$gradient_axes, raw = "elevation and latitude",
+  normalised = "elevation normalised for the lat/lon surface (residual) and latitude normalised for elevation (residual)")
+
 # Samples of one BioProject, or at one location (within CFG$thin_m metres), are not independent: left alone they make the curves and
 # p-values overconfident. The column cluster_id (microbeatlas_filter_data.R) links such samples and gives every connected group one id; ONE
 # random intercept per cluster is used (the effective number of independent units is then the number of clusters). A group can first be
@@ -433,6 +467,36 @@ if (use_re) {
                   paste(sprintf("%s %.2f", re_sd$model[grepl("__net$", re_sd$model)], re_sd$cluster_sd[grepl("__net$", re_sd$model)]), collapse = ", ")))
 }
 
+## ---- A1b. Concurvity of elevation, latitude and space --------------------------------------------------------------
+# Concurvity = how well a smooth term can be predicted from the others (the non-linear analogue of collinearity): near 1, the effect of
+# elevation cannot be told from that of latitude or of the spatial spline. It is computed for the three smooths that matter here (elevation,
+# latitude, spherical spline) in a model WITHOUT the group-difference smooths (a main smooth and its alpine difference of the same variable
+# are collinear by construction), on a random sample (all alpine samples up to a third). "observed" = for the fitted terms, "worst" = the worst
+# case over all possible fits, "estimate" = a rough average; "vs the other two" = a term against the other two together, "pairwise" = against
+# one other term. Values above ~0.8 are a warning.
+if (isTRUE(CFG$concurvity)) {
+  set.seed(3)
+  ia <- which(d$Alpine == "Alpine"); il <- which(d$Alpine == "Lowland")
+  n_a <- min(length(ia), CFG$concurvity_n %/% 3); n_l <- min(length(il), CFG$concurvity_n - n_a)
+  take <- c(ia[sample.int(length(ia), n_a)], il[sample.int(length(il), n_l)])
+  cc_tab <- tryCatch({
+    fc <- gam(as.formula(sprintf("log1p(richness) ~ Alpine + %s + %s + s(lat, lon, bs = 'sos', k = %d)", sm1("elevation"), sm1("glat"), CFG$k_space)),
+              data = d[take, ], method = "REML")
+    nm <- c("s(elevation)", "s(glat)", "s(lat,lon)")
+    full <- mgcv::concurvity(fc, full = TRUE); pair <- mgcv::concurvity(fc, full = FALSE)
+    out <- data.frame(term = nm, versus = "the other two", observed = full["observed", nm], worst = full["worst", nm], estimate = full["estimate", nm], row.names = NULL)
+    for (i in 1:2) for (j in (i + 1):3)
+      out <- rbind(out, data.frame(term = nm[i], versus = nm[j], observed = pair$observed[nm[i], nm[j]], worst = pair$worst[nm[i], nm[j]], estimate = pair$estimate[nm[i], nm[j]]))
+    out
+  }, error = function(e) { message("  concurvity could not be computed: ", conditionMessage(e)); NULL })
+  if (!is.null(cc_tab)) {
+    write.csv(cc_tab, out_a("concurvity.csv"), row.names = FALSE)
+    message(sprintf("Concurvity (%d samples; observed / worst): %s", length(take),
+                    paste(sprintf("%s vs %s %.2f / %.2f", cc_tab$term, cc_tab$versus, cc_tab$observed, cc_tab$worst), collapse = "; ")))
+    if (any(cc_tab$observed > 0.8)) message("  -> above 0.8 (see alpha/concurvity.csv): those terms can hardly be separated; the separate effects of elevation, latitude and space are weakly determined")
+  }
+}
+
 ## ---- A2. Diagnostics -------------------------------------------------------------------
 # Moran's I of deviance residuals (inverse-distance weights, permutation p-value)
 moran_perm <- function(m, d, n_max = CFG$moran_n_max, nperm = CFG$moran_nperm) {
@@ -497,8 +561,8 @@ predict_gradient <- function(m, var) {
   }))
 }
 
-grad_lab <- c(elevation = "Elevation (km)",
-              glat = if (CFG$abs_lat) "Absolute latitude (\u00B0)" else "Latitude (\u00B0)")
+grad_lab <- c(elevation = switch(CFG$gradient_axes, raw = "Elevation (km)", normalised = "Normalised elevation (km)"),
+              glat = if (CFG$gradient_axes == "normalised") "Normalised latitude (\u00B0)" else if (CFG$abs_lat) "Absolute latitude (\u00B0)" else "Latitude (\u00B0)")
 pred <- bind_rows(lapply(names(fits), function(nm) {
   parts <- strsplit(nm, "__")[[1]]
   if (!parts[2] %in% c("net", "raw")) return(NULL)        # net_nounm: tables only
@@ -561,7 +625,7 @@ saveRDS(g, out_a("alpha_full_grid_plot.rds"))
 main_alpha_labels <- resp_lab[CFG$main_alpha_metrics]
 ann_short <- ann %>% mutate(label = sub("Alpine vs lowland shape: ", "", label))
 alpha_panel <- function(gr_label, tag, resp_keep = main_alpha_labels) {
-  show_zones <- gr_label == grad_lab[["glat"]] && !isTRUE(CFG$abs_lat) && length(CFG$lat_breaks) > 0   # zone boundaries of the beta part
+  show_zones <- gr_label == grad_lab[["glat"]] && !isTRUE(CFG$abs_lat) && length(CFG$lat_breaks) > 0 && CFG$gradient_axes != "normalised"   # zone boundaries of the beta part
   pr <- pred[pred$gradient == gr_label & pred$response %in% resp_keep, ]
   pr$response <- droplevels(pr$response)
   an <- ann_short[ann_short$gradient == gr_label & ann_short$response %in% resp_keep, ]
@@ -1271,6 +1335,16 @@ if (RUN_ALPHA && RUN_BETA) {
                list(list(pA), list(pB), list(get_legend(pA)), list(pC, pD)), get_legend(pC), main_caption,
                width = 14, height = 15, row_heights = c(1, 1, 0.17, 1.3))
   saveRDS(list(A = pA, B = pB, C = pC, D = pD), file.path(out_folder, "fig2_panels.rds"))
+} else if (RUN_ALPHA) {                                  # no beta part (sensitivity analyses): panels A and B only
+  pA <- alpha_panel(grad_lab[["elevation"]], "A")
+  pB <- alpha_panel(grad_lab[["glat"]], "B")
+  ab_caption <- paste(sprintf("Alpha diversity (observed OTUs, Shannon index, Pielou J) along %s (axes: gradient_axes = '%s').", axes_txt, CFG$gradient_axes),
+                      "A, B: GAM partial effects adjusted for sequencing depth and unmapped proportion, solid = net of space (95% CI), dashed = no spatial term; stars = test that the alpine",
+                      "gradient differs in shape from the lowland one (net model; *** p < 0.001, ** p < 0.01, * p < 0.05, ns).", alpha_txt)
+  assemble_fig(file.path(out_folder, "fig2AB_alpha_gradients.png"), list(list(pA), list(pB)), get_legend(pA), ab_caption,
+               width = 14, height = 8.5, row_heights = c(1, 1))
+  saveRDS(list(A = pA, B = pB), file.path(out_folder, "fig2AB_panels.rds"))
+  message("The beta part was not run: only panels A and B were drawn (fig2AB_alpha_gradients.png)")
 } else message("Main figure skipped: it needs RUN_ALPHA and RUN_BETA both TRUE.")
 
 message("Done. Outputs in ", out_folder)

@@ -37,7 +37,7 @@ is reported (exit code 1) and a rerun reads only what is missing. A layer file t
 
 Properties (mean prediction, converted to conventional units as in ISRIC's table):
   bdod kg/dm3, cec cmol(c)/kg, cfvo vol%, clay %, sand %, silt %, nitrogen g/kg, phh2o pH,
-  soc g/kg, ocd kg/m3, wv0010 / wv0033 / wv1500 vol% (water content at 10 / 33 / 1500 kPa)
+  soc g/kg, ocd kg/m3
   ocs kg/m2: organic carbon STOCK, only published for 0-30 cm -> ocs_30cm_avg only
 SoilGrids layers: 0-5, 5-15, 15-30, 30-60, 60-100, 100-200 cm, 250 m resolution.
 """
@@ -71,8 +71,9 @@ CACHE_JSONL = TMP_DIR / "soilgrids_tiles_cache.jsonl"
 PROPERTIES = {
     "bdod": 100, "cec": 10, "cfvo": 10, "clay": 10, "sand": 10, "silt": 10,
     "nitrogen": 100, "phh2o": 10, "soc": 10, "ocd": 10,
-    "wv0010": 10, "wv0033": 10, "wv1500": 10,
 }
+# NOT included: wv0010 / wv0033 / wv1500 (water content). ISRIC's layer table mentions them, but files.isric.org has no map file for
+# them (HTTP 404), and the maps ISRIC publishes elsewhere (Google Earth Engine, the geodata package) do not have them either.
 if len(sys.argv) >= 4 and sys.argv[3].strip():        # optional 3rd argument: which properties to read
     _wanted = [p.strip() for p in sys.argv[3].split(",") if p.strip()]
     _unknown = [p for p in _wanted if p not in PROPERTIES]
@@ -326,26 +327,41 @@ def main() -> int:
         xy = {ck: (xi, yi) for ck, xi, yi in zip(todo_cks, x, y)}
 
         # preflight: open one layer and read a point with soil data, so a problem shows up at once and clearly
-        first = sorted(jobs)[0]
-        try:
-            with rasterio.Env(**GDAL_ENV):
-                src = open_with_retry(layer_url(first))
-                try:
-                    log.info("layer %s: %d x %d px, %s, nodata %s, CRS: %s", first, src.width, src.height, src.dtypes[0],
-                             src.nodata, (src.crs.to_string()[:70] if src.crs else "none"))
-                    px, py = to_igh([PREFLIGHT_POINT[0]], [PREFLIGHT_POINT[1]])
-                    r, c = pixel_index(src, px, py)
-                    probe = read_group(src, r, c)[0] if (0 <= r[0] < src.height and 0 <= c[0] < src.width) else None
-                finally:
-                    src.close()
-        except LayerMissing:
-            raise RuntimeError(f"layer file {first} does not exist on the server: check VRT_BASE ({VRT_BASE})")
-        except Exception as e:
-            raise RuntimeError(f"SoilGrids preflight failed on {first}: {e}") from e
-        if probe is None:
+        # a layer that does not exist (404) is skipped, not fatal: the next one is tried, and the preflight fails only if none exists
+        first, probe = None, None
+        for cov in sorted(jobs):
+            try:
+                with rasterio.Env(**GDAL_ENV):
+                    src = open_with_retry(layer_url(cov))
+                    try:
+                        log.info("layer %s: %d x %d px, %s, nodata %s, CRS: %s", cov, src.width, src.height, src.dtypes[0],
+                                 src.nodata, (src.crs.to_string()[:70] if src.crs else "none"))
+                        px, py = to_igh([PREFLIGHT_POINT[0]], [PREFLIGHT_POINT[1]])
+                        r, c = pixel_index(src, px, py)
+                        probe = read_group(src, r, c)[0] if (0 <= r[0] < src.height and 0 <= c[0] < src.width) else None
+                    finally:
+                        src.close()
+            except LayerMissing:
+                missing_layers.append(cov)
+                log.warning("layer %s does not exist on the server (404): left NA", cov)
+                continue
+            except Exception as e:
+                raise RuntimeError(f"SoilGrids preflight failed on {cov}: {e}") from e
+            first = cov
+            break
+        if first is None:
+            if not cache.data:                          # nothing cached and nothing on the server: the address is wrong
+                raise RuntimeError(f"none of the {len(jobs)} layers to read exists on the server: check VRT_BASE ({VRT_BASE})")
+            log.warning("none of the %d remaining layers exists on the server (404): their properties stay NA; everything cached is kept", len(jobs))
+            jobs.clear()
+        for cov in missing_layers:                      # not tried again below
+            jobs.pop(cov, None)
+        total = sum(len(v) for v in jobs.values())
+        if first is not None and probe is None:
             raise RuntimeError(f"preflight: no soil value at lon {PREFLIGHT_POINT[0]}, lat {PREFLIGHT_POINT[1]} in {first}: "
                                f"the projection or the file layout is not what this script assumes")
-        log.info("preflight OK: raw value %d at lon %.1f, lat %.1f", probe, *PREFLIGHT_POINT)
+        if first is not None:
+            log.info("preflight OK: raw value %d at lon %.1f, lat %.1f (layer %s)", probe, *PREFLIGHT_POINT, first)
 
         done, t0, last_log, lock = 0, time.monotonic(), time.monotonic(), threading.Lock()
 
