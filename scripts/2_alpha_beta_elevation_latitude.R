@@ -50,8 +50,8 @@
 #       elev: elevation difference + log10 geographic distance      -> elevation ACCOUNTING FOR SPACE (and the distance decay)
 #       lat : latitude difference + elevation difference            -> latitude ACCOUNTING FOR ELEVATION
 #     The column cluster_id links samples of one BioProject or location (microbeatlas_filter_data.R); alpine samples keep their own
-#     level (clusters with fewer than min_cluster_n alpine samples are pooled), non-alpine samples share one (they are thinned and evenly
-#     spaced). The cost of the random effects grows steeply with the number of alpine clusters (about 20 s for 100, 90 s for 300 on
+#     level (clusters with fewer than min_cluster_n alpine samples are pooled), non-alpine samples have no random effect (they are
+#     thinned and evenly spaced; a 0/1 indicator switches the effect off for them). The cost of the random effects grows steeply with the number of alpine clusters (about 20 s for 100, 90 s for 300 on
 #     small data, four models): raise min_cluster_n or lower max_re_levels if the models are too slow. Slopes: beta/linear_effects.csv,
 #     differences between pair types: beta/linear_effect_type_contrasts.csv, random-effect SDs: beta/random_effect_sd.csv.
 #   * STANDARDISED DISSIMILARITY (beta/standardized_dissimilarity.csv, standardized_contrasts.csv, Figure 2b): from the elev model, the
@@ -760,8 +760,9 @@ message(if (use_sets) sprintf("Replicate pools: all alpine samples + the non-alp
         else "No replicate pools (use_replicate_sets = FALSE, or fewer than n_rep columns rep_01, ... in the earth-data table): the non-alpine samples are a plain random draw from all of them (NOT evenly spaced)")
 
 # Random-effect levels: one per cluster of the ALPINE samples (clusters with fewer than min_cluster_n alpine samples, and samples
-# without a cluster_id, share one level, as do the smallest clusters if there are more than max_re_levels); all non-alpine samples share
-# one level (they are thinned and evenly spaced instead). A pair gets the level of each of its two samples.
+# without a cluster_id, share one level, as do the smallest clusters if there are more than max_re_levels). Non-alpine samples have no
+# random effect (they are thinned and evenly spaced instead; the placeholder level "non_alpine" is switched off by a 0/1 indicator in the
+# models). A pair gets the level of each of its two samples.
 is_alp <- meta$Alpine == "Alpine"
 if ("cluster_id" %in% names(meta)) cl <- as.character(meta$cluster_id) else {
   message("  no column 'cluster_id' in the sample table (run microbeatlas_filter_data.R): the clusters are the locations only")
@@ -776,7 +777,7 @@ if (length(tb) > CFG$max_re_levels - 2) {
 }
 meta$re_cl <- ifelse(is_alp, cl, "non_alpine")
 re_levels <- c("non_alpine", sort(setdiff(unique(meta$re_cl), "non_alpine")))
-if (isTRUE(CFG$cluster_re)) message(sprintf("Beta random effect (one for each of the two samples of a pair): %d levels = %d alpine clusters with >= %d alpine samples + one pooled level (%.1f%% of the alpine samples) + one level for all non-alpine samples",
+if (isTRUE(CFG$cluster_re)) message(sprintf("Beta random effect (one for each of the two samples of a pair): %d levels = %d alpine clusters with >= %d alpine samples + one pooled level (%.1f%% of the alpine samples); non-alpine samples have no random effect",
                                             length(re_levels), sum(!re_levels %in% c("non_alpine", "pooled_small")), CFG$min_cluster_n, 100 * mean(meta$re_cl[is_alp] == "pooled_small")))
 
 alp <- meta[is_alp, ]
@@ -938,6 +939,7 @@ prep_pairs <- function(P) {
   P <- P[P$type %in% keep, ]
   P$type <- factor(P$type, levels = intersect(beta_types, keep))
   P$rep_id <- factor(P$rep_id)                                        # replicate: random effect
+  P$ind_a <- as.numeric(P$cl_a != "non_alpine"); P$ind_b <- as.numeric(P$cl_b != "non_alpine")   # 1 = alpine sample, 0 = non-alpine (no random effect)
   P$cl_a <- factor(P$cl_a, levels = re_levels); P$cl_b <- factor(P$cl_b, levels = re_levels)   # cluster of the two samples of a pair
   P$log10_geo <- log10(pmax(P$geo_km, 0.1))
   P
@@ -953,14 +955,16 @@ fit_beta <- function(P, metric, kind) {
   gradient <- if (kind == "elev") c(gterm("d_elev", "type"), gterm("log10_geo", "type")) else c(gterm("d_lat", "type"), gterm("d_elev", "type"))
   terms <- c("type", sm1("d_depth"), sm1("d_unm"), gradient)                  # an intercept per pair type
   if (nlevels(P$rep_id) > 1) terms <- c(terms, "s(rep_id, bs = 're')")                 # random intercept: replicate
-  if (isTRUE(CFG$cluster_re)) terms <- c(terms, "s(cl_a, bs = 're')", "s(cl_b, bs = 're')")   # random intercepts: cluster of each sample
+  # random intercepts: cluster of each sample. The 0/1 indicator switches the effect off for non-alpine samples: a shared "non-alpine" level
+  # would duplicate the intercepts of the pair types and inflate their intervals
+  if (isTRUE(CFG$cluster_re)) terms <- c(terms, "s(cl_a, bs = 're', by = ind_a)", "s(cl_b, bs = 're', by = ind_b)")
   bam(as.formula(paste("y ~", paste(terms, collapse = " + "))), data = P,
       family = betar(link = "logit"), method = "fREML", discrete = TRUE,
       select = CFG$select, nthreads = CFG$nthreads)
 }
-re_excl <- function(m) intersect(c("s(rep_id)", "s(cl_a)", "s(cl_b)"), vapply(m$smooth, function(s) s$label, ""))   # typical replicate / cluster
+re_excl <- function(m) intersect(c("s(rep_id)", "s(cl_a):ind_a", "s(cl_b):ind_b"), vapply(m$smooth, function(s) s$label, ""))   # typical replicate / cluster
 nd_base <- function(P) data.frame(d_depth = median(P$d_depth), d_unm = median(P$d_unm),
-                                  cl_a = factor(re_levels[1], levels = re_levels), cl_b = factor(re_levels[1], levels = re_levels),
+                                  cl_a = factor(re_levels[1], levels = re_levels), cl_b = factor(re_levels[1], levels = re_levels), ind_a = 0, ind_b = 0,
                                   rep_id = factor(levels(P$rep_id)[1], levels = levels(P$rep_id)))
 
 # Curve of one pair variable per pair TYPE (the other variables at the type's typical values, before stratification); the replicate and
@@ -1103,7 +1107,7 @@ for (metric in names(beta_metrics)) for (kind in c("elev", "lat")) {
     if (is.null(vc)) return(NA_real_)
     if (is.matrix(vc)) { if (lab %in% rownames(vc)) one(vc[lab, 1]) else NA_real_ } else { if (lab %in% names(vc)) one(vc[lab]) else NA_real_ }
   }
-  re_sd_list[[key]] <- data.frame(metric = metric, model = kind, replicate_sd = sdv("s(rep_id)"), cluster_sd_first_sample = sdv("s(cl_a)"), cluster_sd_second_sample = sdv("s(cl_b)"))
+  re_sd_list[[key]] <- data.frame(metric = metric, model = kind, replicate_sd = sdv("s(rep_id)"), cluster_sd_first_sample = sdv("s(cl_a):ind_a"), cluster_sd_second_sample = sdv("s(cl_b):ind_b"))
   if (isTRUE(CFG$cluster_re)) message(sprintf("  random-effect SD (logit scale): cluster %.2f / %.2f (first / second sample of a pair), replicate %.2f",
                                               re_sd_list[[key]]$cluster_sd_first_sample, re_sd_list[[key]]$cluster_sd_second_sample, re_sd_list[[key]]$replicate_sd))
   summ[[key]] <- data.frame(metric = metric, model = kind, dev_expl = one(sm_m$dev.expl), n_pairs = nrow(P), st, check.names = FALSE, stringsAsFactors = FALSE)
