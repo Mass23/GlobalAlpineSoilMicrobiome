@@ -22,10 +22,12 @@
 #
 # PART B  beta diversity (community dissimilarity) between pairs of samples
 #   * SAMPLE POOLS. Figure 2 uses ALL samples: the gradient models condition on elevation, latitude and distance, so an
-#     unbalanced design does not bias the curves. Samples that share a location are not independent, so ALPHA models keep every
-#     alpine sample and give each location (samples within thin_m metres) a random intercept, plus a spherical spline for the
-#     regional trend; the lowland group (data-rich) is thinned to one sample per location (a random effect with ~100k levels is
-#     not feasible in mgcv; see alpha_cluster_*). BETA pairs are drawn from one random sample per location in each replicate:
+#     unbalanced design does not bias the curves. Samples of one BioProject, or at one location, are not independent: the
+#     column cluster_id (microbeatlas_filter_data.R) links such samples (a connected group = one cluster), and the ALPHA models
+#     use ONE random intercept per cluster (cluster_re), plus a spherical spline for the regional trend. Alpine samples are all
+#     kept; the lowland group (data-rich) is first thinned to one sample per location (thin_lowland), which keeps the random
+#     effect affordable (a random effect with ~100k levels is not feasible in mgcv). BETA pairs are drawn from one random sample
+#     per location in each replicate:
 #     different replicates draw different samples of a location, so all samples are used across the replicates. The LOWLAND
 #     samples of replicate r come from the random draw rep_r of define_lowland_sets.py (n_rep draws, EVENLY SPACED over
 #     latitude / longitude cells, as many lowland samples as alpine ones; flags rep_01 ... in the earth-data table), so that
@@ -125,12 +127,12 @@ CFG <- list(
   ref_zone    = "Northern mid-latitudes",   # zone the other zones are compared with in standardized_contrasts.csv (else: the zone with most pairs)
   thin_m      = 100,            # a LOCATION = samples within this radius (metres). Beta subsamples: at most ONE sample per location and replicate
                                 #   (metres, chosen at random); 0 = only distinct coordinates (exact duplicates removed)
-  alpha_cluster_alpine  = "re",   # alpha models (part A): samples within thin_m metres of each other share a location. ALPINE group:
-                                  #   "re" = keep every sample, random intercept per location; "thin" = one sample per location; "none"
-  alpha_cluster_lowland = "thin", # LOWLAND group: "thin" = one sample per location (a data-rich group: a random effect with ~100k levels
-                                  #   is not feasible in mgcv); "re" = random intercept per re_cell_deg cell; "none"
-  re_cell_deg   = 1,              # size (degrees) of the cells of the lowland random effect (alpha_cluster_lowland = "re")
-  max_re_levels = 3000,           # safety: a random effect may have at most this many levels (the cost grows steeply with the levels)
+  cluster_re    = TRUE,           # ONE random intercept per cluster (column cluster_id from microbeatlas_filter_data.R: samples that share a
+                                  #   BioProject or lie within thin_m metres of each other, directly or through a chain of such samples)
+  min_cluster_n = 5,              # clusters with fewer samples (in the model data) share ONE level, as do samples without a cluster_id
+  thin_alpine   = FALSE,          # thin a group to one random sample per location BEFORE modelling (cheaper, but discards samples): alpine ...
+  thin_lowland  = TRUE,           # ... and lowland (data-rich: thinning costs little)
+  max_re_levels = 3000,           # safety: the random effect may have at most this many levels (the cost grows steeply with the levels)
   k_space     = 60,             # basis dimension of the sos spatial spline
   k_space_alpine = 30,          # Supplementary Figure 3: basis dimension of the alpine-specific surface
   grid_res    = 2,              # Supplementary Figure 3: grid resolution (degrees)
@@ -319,48 +321,45 @@ d <- raw %>%
          is.finite(richness), is.finite(shannon), shannon > 0, is.finite(pielou), is.finite(unmapped_prop),
          !is.na(Alpine))
 
-# Samples that share a location (within CFG$thin_m metres: one study / site) are not independent: left alone they make the curves and
-# p-values overconfident. Per group: "re" = keep every sample and give each location a random intercept (the effective number of
-# independent units is then the number of locations); "thin" = keep one random sample per location; "none" = nothing.
-alpha_how <- c(Alpine = CFG$alpha_cluster_alpine, Lowland = CFG$alpha_cluster_lowland)
-if (!all(alpha_how %in% c("re", "thin", "none"))) stop('CFG$alpha_cluster_alpine / _lowland must be "re", "thin" or "none"')
-set.seed(7); n0 <- nrow(d); d$re_loc <- NA_character_; keep_rows <- rep(TRUE, nrow(d))
+# Samples of one BioProject, or at one location (within CFG$thin_m metres), are not independent: left alone they make the curves and
+# p-values overconfident. The column cluster_id (microbeatlas_filter_data.R) links such samples and gives every connected group one id; ONE
+# random intercept per cluster is used (the effective number of independent units is then the number of clusters). A group can first be
+# thinned to one random sample per location (thin_alpine / thin_lowland), which makes the random effect cheaper.
+set.seed(7); n0 <- nrow(d); keep_rows <- rep(TRUE, nrow(d))
 for (g in levels(d$Alpine)) {
-  ix <- which(d$Alpine == g)
-  if (alpha_how[[g]] == "thin") {
-    keep_rows[ix] <- FALSE; keep_rows[ix[thin_sites(d$lat[ix], d$lon[ix], CFG$thin_m)]] <- TRUE
-  } else if (alpha_how[[g]] == "re") {
-    id <- if (g == "Alpine") cluster_sites(d$lat[ix], d$lon[ix], CFG$thin_m) else {
-      cs <- CFG$re_cell_deg
-      repeat {                                      # coarsen the cells until the random effect is affordable
-        key <- paste(floor(d$lat[ix] / cs), floor(d$lon[ix] / cs))
-        if (length(unique(key)) <= CFG$max_re_levels || cs > 40) break
-        cs <- cs * 2
-      }
-      if (cs != CFG$re_cell_deg) message(sprintf("  lowland random effect: cells coarsened to %g degrees (max_re_levels = %d)", cs, CFG$max_re_levels))
-      match(key, unique(key))
-    }
-    d$re_loc[ix] <- paste0(substr(g, 1, 1), id)
+  if (isTRUE(if (g == "Alpine") CFG$thin_alpine else CFG$thin_lowland)) {
+    ix <- which(d$Alpine == g); keep_rows[ix] <- FALSE
+    keep_rows[ix[thin_sites(d$lat[ix], d$lon[ix], CFG$thin_m)]] <- TRUE
   }
 }
 d <- d[keep_rows, ]
-d$re_ind <- as.numeric(!is.na(d$re_loc))             # 1 = this row has a location random effect, 0 = it has none (thinned or "none")
-use_re <- sum(d$re_ind) > 0
-d$re_loc <- if (use_re) { f <- factor(d$re_loc); f[is.na(f)] <- levels(f)[1]; f } else factor(rep("none", nrow(d)))
-if (use_re && nlevels(d$re_loc) > CFG$max_re_levels)
-  stop(sprintf("the location random effect has %d levels (> max_re_levels = %d): thin that group (alpha_cluster_* = \"thin\") or raise max_re_levels",
-               nlevels(d$re_loc), CFG$max_re_levels))
-re_rhs <- if (use_re) "+ s(re_loc, bs = 're', by = re_ind)" else ""         # label: s(re_loc):re_ind
-re_labels <- "s(re_loc):re_ind"
-message(sprintf("Alpha data: %d -> %d samples (alpine %d, lowland %d); location random effect with %d levels (alpine: %s, lowland: %s)",
-                n0, nrow(d), sum(d$Alpine == "Alpine"), sum(d$Alpine == "Lowland"), if (use_re) nlevels(d$re_loc) else 0L,
-                alpha_how[["Alpine"]], alpha_how[["Lowland"]]))
-how_txt <- function(g, noun) switch(alpha_how[[g]],
-  re   = sprintf("all %s samples with a random intercept per %s", tolower(g), noun),
-  thin = sprintf("%s samples thinned to at most one per %g m", tolower(g), CFG$thin_m),
-  none = sprintf("all %s samples", tolower(g)))
-alpha_txt <- sprintf("A, B use %s and %s, and a spherical spline for the regional trend.", how_txt("Alpine", sprintf("location (samples within %g m)", CFG$thin_m)),
-                     how_txt("Lowland", sprintf("%g-degree cell", CFG$re_cell_deg)))
+use_re <- isTRUE(CFG$cluster_re)
+re_rhs <- ""; re_labels <- character(0)
+if (use_re) {
+  if ("cluster_id" %in% names(d)) cl <- as.character(d$cluster_id) else {
+    message("  no column 'cluster_id' in the sample table (run microbeatlas_filter_data.R): the clusters are the locations only")
+    cl <- paste0("L", cluster_sites(d$lat, d$lon, CFG$thin_m))
+  }
+  cl[is.na(cl) | !nzchar(cl)] <- "pooled_small"
+  tb <- table(cl); cl[cl %in% names(tb)[tb < CFG$min_cluster_n]] <- "pooled_small"
+  tb <- sort(table(cl[cl != "pooled_small"]), decreasing = TRUE)
+  if (length(tb) > CFG$max_re_levels - 1) {
+    cl[cl %in% names(tb)[seq(CFG$max_re_levels, length(tb))]] <- "pooled_small"
+    message(sprintf("  cluster random effect: the %d smallest clusters are pooled as well (max_re_levels = %d)", length(tb) - (CFG$max_re_levels - 1), CFG$max_re_levels))
+  }
+  d$re_cluster <- factor(cl)
+  re_rhs <- "+ s(re_cluster, bs = 're')"; re_labels <- "s(re_cluster)"
+  big <- sort(table(cl[cl != "pooled_small"]), decreasing = TRUE)
+  message(sprintf("Cluster random effect: %d levels (%d clusters with >= %d samples + one pooled level holding %.1f%% of the samples); largest clusters: %s",
+                  nlevels(d$re_cluster), length(big), CFG$min_cluster_n, 100 * mean(cl == "pooled_small"),
+                  paste(sprintf("%s (%.1f%%)", names(head(big, 3)), 100 * as.integer(head(big, 3)) / nrow(d)), collapse = ", ")))
+} else d$re_cluster <- factor(rep("none", nrow(d)))
+excl_for <- function(m) intersect(c("s(lat,lon)", re_labels), vapply(m$smooth, function(s) s$label, ""))   # no spatial term, no cluster effect
+message(sprintf("%d samples in the models (of %d): alpine %d, lowland %d (thinning: alpine %s, lowland %s)",
+                nrow(d), n0, sum(d$Alpine == "Alpine"), sum(d$Alpine == "Lowland"), isTRUE(CFG$thin_alpine), isTRUE(CFG$thin_lowland)))
+how_txt <- function(g) if (isTRUE(if (g == "Alpine") CFG$thin_alpine else CFG$thin_lowland)) sprintf("%s samples thinned to at most one per %g m", tolower(g), CFG$thin_m) else sprintf("all %s samples", tolower(g))
+alpha_txt <- sprintf("A, B use %s and %s, %s, and a spherical spline for the regional trend.", how_txt("Alpine"), how_txt("Lowland"),
+                     if (use_re) sprintf("one random intercept per cluster (samples of one BioProject or within %g m of each other are linked)", CFG$thin_m) else "no cluster random effect")
 
 # Pielou J must be strictly in (0, 1) for beta regression (squeeze only if needed)
 if (any(d$pielou <= 0 | d$pielou >= 1)) {
@@ -421,17 +420,17 @@ for (resp in names(families)) {
   }
 }
 saveRDS(fits, fits_file)
-# how strong is the clustering of samples within locations? standard deviation of the location random intercept (link scale)
+# how strong is the clustering of samples? standard deviation of the cluster random intercept (link scale)
 if (use_re) {
   re_sd <- bind_rows(lapply(names(fits), function(nm) {
     sd_loc <- tryCatch({ vc <- suppressWarnings(gam.vcomp(fits[[nm]], rescale = FALSE))
                          if (is.list(vc) && !is.matrix(vc)) vc <- vc$vc
                          as.numeric(if (is.matrix(vc)) vc[re_labels, 1] else vc[re_labels]) }, error = function(e) NA_real_)
-    data.frame(model = nm, location_sd = if (length(sd_loc) == 1) sd_loc else NA_real_)
+    data.frame(model = nm, cluster_sd = if (length(sd_loc) == 1) sd_loc else NA_real_)
   }))
-  write.csv(re_sd, out_a("location_random_effect_sd.csv"), row.names = FALSE)
-  message(sprintf("Location random effect: SD %s (link scale; per model in alpha/location_random_effect_sd.csv)",
-                  paste(sprintf("%s %.2f", re_sd$model[grepl("__net$", re_sd$model)], re_sd$location_sd[grepl("__net$", re_sd$model)]), collapse = ", ")))
+  write.csv(re_sd, out_a("cluster_random_effect_sd.csv"), row.names = FALSE)
+  message(sprintf("Cluster random effect: SD %s (link scale; per model in alpha/cluster_random_effect_sd.csv)",
+                  paste(sprintf("%s %.2f", re_sd$model[grepl("__net$", re_sd$model)], re_sd$cluster_sd[grepl("__net$", re_sd$model)]), collapse = ", ")))
 }
 
 ## ---- A2. Diagnostics -------------------------------------------------------------------
@@ -484,7 +483,7 @@ predict_gradient <- function(m, var) {
   bind_rows(lapply(levels(d$Alpine), function(a) {
     sub <- d[d$Alpine == a, ]
     nd <- data.frame(Alpine = factor(a, levels = levels(d$Alpine)),
-                     re_loc = factor(levels(d$re_loc)[1], levels = levels(d$re_loc)), re_ind = 0,
+                     re_cluster = factor(levels(d$re_cluster)[1], levels = levels(d$re_cluster)),
                      AlpineO = factor(a, levels = levels(d$Alpine), ordered = TRUE),
                      elevation = median(sub$elevation), glat = median(sub$glat),
                      log10_reads = median(d$log10_reads), unmapped_prop = median(sub$unmapped_prop),
@@ -633,7 +632,7 @@ grp_fit <- bind_rows(lapply(levels(d$Alpine), function(g) {
   nd$Alpine  <- factor(g, levels = levels(d$Alpine))
   nd$AlpineO <- factor(g, levels = levels(d$Alpine), ordered = TRUE)
   nd$log10_reads <- median(d$log10_reads)
-  nd$re_loc <- factor(levels(d$re_loc)[1], levels = levels(d$re_loc)); nd$re_ind <- 0        # no location random effect on the map
+  nd$re_cluster <- factor(levels(d$re_cluster)[1], levels = levels(d$re_cluster))             # no cluster random effect on the map
   nd$fit <- as.numeric(predict(m_sp, nd, type = "response", newdata.guaranteed = TRUE, discrete = FALSE,
                                exclude = intersect(re_labels, vapply(m_sp$smooth, function(s) s$label, ""))))
   nd$n_near <- neighbourhood_n(d[d$Alpine == g, ])
