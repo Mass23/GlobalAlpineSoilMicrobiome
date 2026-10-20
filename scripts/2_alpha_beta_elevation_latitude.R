@@ -471,29 +471,39 @@ if (use_re) {
 # Concurvity = how well a smooth term can be predicted from the others (the non-linear analogue of collinearity): near 1, the effect of
 # elevation cannot be told from that of latitude or of the spatial spline. It is computed for the three smooths that matter here (elevation,
 # latitude, spherical spline) in a model WITHOUT the group-difference smooths (a main smooth and its alpine difference of the same variable
-# are collinear by construction), on a random sample (all alpine samples up to a third). "observed" = for the fitted terms, "worst" = the worst
-# case over all possible fits, "estimate" = a rough average; "vs the other two" = a term against the other two together, "pairwise" = against
-# one other term. Values above ~0.8 are a warning.
+# are collinear by construction), on a random sample (all alpine samples up to a third). Two models, because the Alpine group term matters:
+# alpine means high elevation by definition, so with the group in the model elevation is "explained" by it. Rows:
+#   "the other two smooths"           a term against the other two smooths together (model without the Alpine group)
+#   "the other two smooths + Alpine"  the same with the Alpine group term in the model
+#   "<term>"                          pairwise, against one other smooth (model without the Alpine group)
+# "observed" = for the fitted terms, "worst" = the worst case over all possible fits, "estimate" = a rough average. Above ~0.8 = warning.
 if (isTRUE(CFG$concurvity)) {
   set.seed(3)
   ia <- which(d$Alpine == "Alpine"); il <- which(d$Alpine == "Lowland")
   n_a <- min(length(ia), CFG$concurvity_n %/% 3); n_l <- min(length(il), CFG$concurvity_n - n_a)
   take <- c(ia[sample.int(length(ia), n_a)], il[sample.int(length(il), n_l)])
   cc_tab <- tryCatch({
-    fc <- gam(as.formula(sprintf("log1p(richness) ~ Alpine + %s + %s + s(lat, lon, bs = 'sos', k = %d)", sm1("elevation"), sm1("glat"), CFG$k_space)),
-              data = d[take, ], method = "REML")
+    sm3 <- sprintf("%s + %s + s(lat, lon, bs = 'sos', k = %d)", sm1("elevation"), sm1("glat"), CFG$k_space)
+    f0 <- gam(as.formula(paste("log1p(richness) ~", sm3)), data = d[take, ], method = "REML")             # the three smooths only
+    f1 <- gam(as.formula(paste("log1p(richness) ~ Alpine +", sm3)), data = d[take, ], method = "REML")    # ... and the Alpine group
     nm <- c("s(elevation)", "s(glat)", "s(lat,lon)")
-    full <- mgcv::concurvity(fc, full = TRUE); pair <- mgcv::concurvity(fc, full = FALSE)
-    out <- data.frame(term = nm, versus = "the other two", observed = full["observed", nm], worst = full["worst", nm], estimate = full["estimate", nm], row.names = NULL)
-    for (i in 1:2) for (j in (i + 1):3)
-      out <- rbind(out, data.frame(term = nm[i], versus = nm[j], observed = pair$observed[nm[i], nm[j]], worst = pair$worst[nm[i], nm[j]], estimate = pair$estimate[nm[i], nm[j]]))
-    out
+    c0 <- mgcv::concurvity(f0, full = TRUE); p0 <- mgcv::concurvity(f0, full = FALSE)
+    c1 <- mgcv::concurvity(f1, full = TRUE); p1 <- mgcv::concurvity(f1, full = FALSE)
+    row <- function(term, versus, m, i, j = term) data.frame(term = term, versus = versus, observed = m$observed[i, j], worst = m$worst[i, j], estimate = m$estimate[i, j])
+    out <- rbind(
+      data.frame(term = nm, versus = "the other two smooths", observed = c0["observed", nm], worst = c0["worst", nm], estimate = c0["estimate", nm]),
+      data.frame(term = nm, versus = "the other two smooths + Alpine", observed = c1["observed", nm], worst = c1["worst", nm], estimate = c1["estimate", nm]))
+    for (i in 1:2) for (j in (i + 1):3) out <- rbind(out, row(nm[i], nm[j], p0, nm[i], nm[j]))
+    rownames(out) <- NULL; out
   }, error = function(e) { message("  concurvity could not be computed: ", conditionMessage(e)); NULL })
   if (!is.null(cc_tab)) {
     write.csv(cc_tab, out_a("concurvity.csv"), row.names = FALSE)
-    message(sprintf("Concurvity (%d samples; observed / worst): %s", length(take),
-                    paste(sprintf("%s vs %s %.2f / %.2f", cc_tab$term, cc_tab$versus, cc_tab$observed, cc_tab$worst), collapse = "; ")))
-    if (any(cc_tab$observed > 0.8)) message("  -> above 0.8 (see alpha/concurvity.csv): those terms can hardly be separated; the separate effects of elevation, latitude and space are weakly determined")
+    show <- function(v) paste(sprintf("%s %.2f / %.2f", cc_tab$term[cc_tab$versus == v], cc_tab$observed[cc_tab$versus == v], cc_tab$worst[cc_tab$versus == v]), collapse = "; ")
+    message(sprintf("Concurvity (%d samples; observed / worst), against the other two smooths: %s", length(take), show("the other two smooths")))
+    message("  with the Alpine group term as well: ", show("the other two smooths + Alpine"))
+    message("  pairwise: ", paste(sprintf("%s vs %s %.2f / %.2f", cc_tab$term, cc_tab$versus, cc_tab$observed, cc_tab$worst)[!cc_tab$versus %in% c("the other two smooths", "the other two smooths + Alpine")], collapse = "; "))
+    if (any(cc_tab$observed[cc_tab$versus == "the other two smooths"] > 0.8))
+      message("  -> above 0.8 against the other two smooths (see alpha/concurvity.csv): those terms can hardly be separated; their separate effects are weakly determined")
   }
 }
 
