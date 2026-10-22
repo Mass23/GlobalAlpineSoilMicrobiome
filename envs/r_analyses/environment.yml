@@ -32,3 +32,6 @@ dependencies:
   - proj
   - proj-data
   - gdal
+
+  # umap
+  - r-uwot
