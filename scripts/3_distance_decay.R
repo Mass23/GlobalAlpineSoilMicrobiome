@@ -181,6 +181,14 @@ required <- c("Longitude", "Latitude", CFG$group_col, "cluster_id", "alpha_total
 miss <- setdiff(required, names(raw))
 if (length(miss)) stop("Missing columns in ", CFG$sample_file, ": ", paste(miss, collapse = ", "),
                        "  (perialpine_alpine and cluster_id are written by microbeatlas_filter_data.R: rerun prepare_microbeatlas_data)")
+# the group column must be plausible: most non-alpine samples are Lowland, some Perialpine (a table in which every non-alpine sample is
+# Perialpine, or none is, comes from wrong distances to the alpine polygons: rerun prepare_microbeatlas_data, it recomputes the column)
+local({
+  f <- as.character(raw[[CFG$group_col]]); f <- f[f %in% c("Lowland", "Perialpine")]
+  if (!(length(f) > 0 && any(f == "Lowland") && mean(f == "Perialpine") < 0.5))
+    stop("the column ", CFG$group_col, " is not plausible (non-alpine samples: ", sum(f == "Lowland"), " Lowland, ", sum(f == "Perialpine"),
+         " Perialpine): rerun prepare_microbeatlas_data so that it is recomputed")
+})
 meta <- raw %>%
   transmute(id = .data[[CFG$biom_id]], group = factor(.data[[CFG$group_col]], levels = CFG$groups),
             lon = Longitude, lat = Latitude, cl = as.character(cluster_id),

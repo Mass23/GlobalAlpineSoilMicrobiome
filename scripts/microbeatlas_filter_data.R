@@ -42,7 +42,7 @@ library(vegan)
 #          <data_folder>/sample_accessions.txt, unless tsv_out /
 #          accessions_out are given.
 # =============================================================================
-message(">>> microbeatlas_filter_data.R v2026-10-19c (sample table as TSV + accession list; + bioproject, perialpine_alpine, cluster_id; GPT_Geotext filter) <<<")
+message(">>> microbeatlas_filter_data.R v2026-10-22a (sample table as TSV + accession list; + bioproject, perialpine_alpine, cluster_id; GPT_Geotext filter; perialpine polygons repaired) <<<")
 args <- commandArgs(trailingOnly = TRUE)
 # Snakemake passes the data folder as the first argument; fall back to the default path when run by hand
 data_folder = if (length(args) >= 1) as.character(args[1]) else "/home/renku/work/epfl-altshuler/GlobalAlpineSoilMicrobiome/data"
@@ -341,14 +341,45 @@ add_cluster_id <- function(tab, radius_m = CLUSTER_RADIUS_M, max_projects = MAX_
 # New column perialpine_alpine (factor: Lowland < Perialpine < Alpine); the column Alpine (Lowland / Alpine) is NOT changed. Distances
 # are exact great-circle distances on the sphere (the s2 library: an index over the polygons, so 400k points take minutes, not hours).
 # Points already flagged Alpine stay Alpine; the other points are "Perialpine" if an alpine polygon lies within PERIALPINE_KM.
+# Is a perialpine_alpine column plausible? Alpine areas are small: most non-alpine samples are Lowland, and some are Perialpine.
+perialpine_plausible <- function(f) {
+  f <- as.character(f); f <- f[f %in% c("Lowland", "Perialpine")]
+  length(f) > 0 && any(f == "Lowland") && mean(f == "Perialpine") < 0.5
+}
+
+# The alpine polygons are made VALID (planar, GEOS) before they go to s2: a global layer nearly always has a few invalid polygons
+# (self-crossing rings, spikes). GEOS, which does the Alpine test, tolerates them, but s2 turns one self-crossing polygon into a
+# geography that is "within 20 km" of EVERY point on the globe (then all lowland samples came out Perialpine). Polygons that s2 still
+# reads as degenerate (zero area) are dropped, and an implausible result (no Lowland, or half of the lowland samples Perialpine) stops
+# the script instead of writing a wrong column. An existing implausible column is recomputed.
 add_perialpine <- function(tab, alpine_sf = NULL, km = PERIALPINE_KM) {
-  if ("perialpine_alpine" %in% names(tab)) return(tab)
+  if ("perialpine_alpine" %in% names(tab)) {
+    if (perialpine_plausible(tab$perialpine_alpine)) return(tab)
+    warning("the existing column perialpine_alpine is not plausible (", paste(names(table(tab$perialpine_alpine)), table(tab$perialpine_alpine), collapse = ", "),
+            "): it is recomputed", call. = FALSE)
+    tab$perialpine_alpine <- NULL
+  }
   if (is.null(alpine_sf)) alpine_sf <- sf::st_as_sf(terra::vect(alpine_shp))
   is_alp <- as.character(tab$Alpine) == "Alpine"
   idx <- which(!is_alp & is.finite(tab$Longitude) & is.finite(tab$Latitude))
   message(sprintf("perialpine_alpine: distance (s2, great-circle) of %d lowland samples to %d alpine polygons, threshold %g km", length(idx), nrow(alpine_sf), km))
-  alp_s2 <- tryCatch(sf::st_as_s2(sf::st_geometry(alpine_sf), rebuild = TRUE),
-                     error = function(e) stop("s2 could not use the alpine polygons (", conditionMessage(e), "): try sf::st_make_valid() on them first"))
+
+  geom <- sf::st_geometry(alpine_sf)
+  s2_old <- suppressMessages(sf::sf_use_s2(FALSE)); on.exit(suppressMessages(sf::sf_use_s2(s2_old)), add = TRUE)     # planar GEOS for the repair
+  inv <- !sf::st_is_valid(geom)
+  if (any(inv)) {
+    message(sprintf("  %d of %d alpine polygons are invalid (self-crossing rings, spikes): repaired with st_make_valid before the distance step", sum(inv), length(geom)))
+    geom[inv] <- sf::st_make_valid(geom[inv])
+  }
+  geom <- sf::st_collection_extract(geom, "POLYGON"); geom <- geom[!sf::st_is_empty(geom)]
+  suppressMessages(sf::sf_use_s2(TRUE))
+  alp_s2 <- tryCatch(sf::st_as_s2(geom, rebuild = TRUE),
+                     error = function(e) stop("s2 could not use the alpine polygons (", conditionMessage(e), ")"))
+  area <- s2::s2_area(alp_s2)
+  bad <- !is.finite(area) | area <= 0
+  if (any(bad)) { message(sprintf("  %d polygons have no area on the sphere (degenerate): left out", sum(bad))); alp_s2 <- alp_s2[!bad] }
+  message(sprintf("  %d polygons used; area per polygon (km2): median %.0f, largest %.0f", length(alp_s2), median(area[!bad]) / 1e6, max(area[!bad]) / 1e6))
+
   near <- logical(nrow(tab))
   for (ch in split(idx, ceiling(seq_along(idx) / 50000))) {
     pts <- s2::s2_geog_point(tab$Longitude[ch], tab$Latitude[ch])
@@ -357,6 +388,9 @@ add_perialpine <- function(tab, alpine_sf = NULL, km = PERIALPINE_KM) {
   }
   tab$perialpine_alpine <- factor(ifelse(is_alp, "Alpine", ifelse(near, "Perialpine", "Lowland")), levels = c("Lowland", "Perialpine", "Alpine"))
   print(table(tab$perialpine_alpine))
+  if (!perialpine_plausible(tab$perialpine_alpine))
+    stop("perialpine_alpine is not plausible (", paste(names(table(tab$perialpine_alpine)), table(tab$perialpine_alpine), collapse = ", "),
+         "): the distances to the alpine polygons are wrong. Not written.")
   tab
 }
 
@@ -376,14 +410,17 @@ if (!FORCE_RERUN && file.exists(tsv_out)) {
   tab <- read_tsv_table(tsv_out)
   stopifnot("column 'Accessions' not found in the table" = "Accessions" %in% names(tab))
   cols_before <- names(tab); n_before <- nrow(tab)
+  pa_before <- if ("perialpine_alpine" %in% names(tab)) as.character(tab$perialpine_alpine)
   tab <- drop_geotext(tab)
   tab <- add_bioproject(tab)
   tab <- add_cluster_id(tab)
   tab <- add_perialpine(tab)
-  if (nrow(tab) != n_before || !identical(names(tab), cols_before)) {
+  pa_changed <- !is.null(pa_before) && !identical(pa_before, as.character(tab$perialpine_alpine))
+  if (nrow(tab) != n_before || !identical(names(tab), cols_before) || pa_changed) {
     write_tsv_safe(tab, tsv_out)
     message("Updated ", tsv_out, ": ", n_before - nrow(tab), " samples dropped, columns added: ",
-            if (length(setdiff(names(tab), cols_before))) paste(setdiff(names(tab), cols_before), collapse = ", ") else "none")
+            if (length(setdiff(names(tab), cols_before))) paste(setdiff(names(tab), cols_before), collapse = ", ") else "none",
+            if (pa_changed) "; perialpine_alpine was wrong and has been recomputed" else "")
   }
   acc <- unique(tab$Accessions)
   stopifnot("no accession could be read from the table" = length(acc) > 0)
