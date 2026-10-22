@@ -33,12 +33,11 @@ DONE_2 = f"{RESULTS}/2_alpha_beta_elevation_latitude/.done"
 DONE_3 = f"{RESULTS}/3_distance_decay/.done"
 
 # Script 3: distance decay of community dissimilarity in alpine / peri-alpine / lowland samples. Needs perialpine_alpine and cluster_id (written
-# by prepare_microbeatlas_data), the filtered BIOM and the terrain table (elevation, for the inset of the map); no climate / soil tables
+# by prepare_microbeatlas_data) and the filtered BIOM; no climate / soil / terrain tables
 rule analysis_step_3:
     input:
         table=SAMPLE_DATA_FILTERED,
-        biom=FILTERED_BIOM,
-        env=OTHER_CSV
+        biom=FILTERED_BIOM
     output:
         DONE_3
     conda:
@@ -47,7 +46,7 @@ rule analysis_step_3:
         out_folder=os.path.dirname(DONE_3)
     shell:
         """
-        Rscript scripts/3_distance_decay.R {input.table} {input.biom} {input.env} {params.out_folder}
+        Rscript scripts/3_distance_decay.R {input.table} {input.biom} {params.out_folder}
         """
 
 rule all:

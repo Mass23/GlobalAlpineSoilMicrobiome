@@ -37,19 +37,27 @@
 #     that need soil data (Figures 3-5): analyse replicate by replicate and combine.
 #   * Bray-Curtis (relative abundances) and Jaccard (presence/absence after rarefaction to rare_depth reads), computed
 #     only for the drawn pairs from sparse matrices (checked against vegan::vegdist in TEST_MODE).
-#   * LINEAR MODELS (beta_fit = "ols": least squares = the mean dissimilarity, recommended; "robust": MASS::rlm, which with many pairs at
-#     exactly 1 drifts toward the pile), one per replicate, metric and model, on the dissimilarity itself (effects in units of
-#     dissimilarity): an intercept and one slope per pair type, linear nuisance terms for the differences in depth and unmapped
+#   * ONE ordinary LINEAR REGRESSION per metric and model on the dissimilarity itself (effects in units of dissimilarity) and on the pairs of
+#     ALL replicates: an intercept and one slope per pair type, linear nuisance terms for the differences in depth and unmapped
 #     proportion. (A beta regression does not converge with the pile of dissimilarities at exactly 1.)
 #       elev: elevation difference + log10 geographic distance      -> elevation ACCOUNTING FOR SPACE (distance is a covariate, not drawn)
 #       lat : latitude difference + elevation difference            -> latitude ACCOUNTING FOR ELEVATION
-#     Curves, slopes and contrasts are the MEDIAN over the replicates and ribbons / bars the range between replicates (2.5-97.5%).
-#     Tables: beta/linear_effects.csv (slopes per pair type), linear_effect_type_contrasts.csv (differences between pair types),
-#     coefficients_per_replicate.csv, samples_per_replicate.csv, pair_counts.csv, share_of_pairs_at_dissimilarity_1.csv and
-#     model_checks.csv (does every fit reproduce the observed mean dissimilarity? a warning is printed if not).
-#   CAVEAT: the range between replicates shows how much the result depends on WHICH samples are drawn (alpine sample of each cluster,
-#   non-alpine samples, pairs). It is not a confidence interval of the population: that would need the sampling of clusters themselves,
-#   and pairs reuse samples. Judge robustness by the size of the effects, their consistency between replicates and model_checks.csv.
+#     The lines of Figure 2C are this regression, the ribbons its 95% interval, the open circles the observed dissimilarity (adjusted to
+#     the typical values of the other variables) in 8 bins. The stars in the panels test the slope of every pair type and the differences
+#     between the slopes of two pair types.
+#   * STATISTICS. Pairs that share a sample, and samples of one cluster, are not independent: an ordinary regression treats thousands of pairs as
+#     thousands of observations and gives far too small p-values (simulation: 63-67% false positives at p < 0.05 for a true null). The
+#     estimates are the ordinary least-squares ones; their standard errors are cluster-robust for DYADIC data (Aronow, Samii & Assenova
+#     2015: the scores of all pairs that share a CLUSTER are summed), so the number of independent units is the number of clusters
+#     (BioProject / location groups, column cluster_id), however many replicates there are: in a simulation this had the correct 5% false
+#     positives and about twice the power of testing each replicate separately and averaging; more than ~20 replicates add nothing (they redraw
+#     from the same clusters). t-tests with (clusters - 1) degrees of freedom; no adjustment for multiple tests.
+#     Tables: beta/model_coefficients.csv (all coefficients, with the p-values of the ordinary regression in the column p_naive_lm_NOT_VALID,
+#     for comparison only), beta/linear_effects.csv (slopes per pair type), beta/linear_effect_type_contrasts.csv (differences between pair
+#     types), samples_per_replicate.csv, pair_counts.csv, share_of_pairs_at_dissimilarity_1.csv and model_checks.csv (does every fit reproduce
+#     the observed mean dissimilarity? a warning is printed if not).
+#   CAVEAT: the tests cannot see spatial autocorrelation between DIFFERENT clusters (neighbouring regions resemble each other): judge
+#   robustness by the size of the effects.
 #
 # ALPHA GRADIENT AXES (gradient_axes): "raw" (default) = elevation and latitude; the sensitivity analysis "normalised" (elevation and latitude as
 #   residuals against a lat/lon surface / an elevation relation) reruns the alpha part only, into <out_folder>_axes_normalised.
@@ -142,8 +150,6 @@ CFG <- list(
   rare_depth  = 1000,           # rarefaction depth for Jaccard (samples below are dropped)
   n_pairs     = 1000,           # pairs per pair type and replicate (shared as evenly as possible over the distance x elevation classes)
   min_pairs   = 100,            # pair types with fewer pairs are dropped from the models
-  beta_fit    = "ols",          # linear model of the dissimilarity: "ols" = least squares (the MEAN dissimilarity; recommended) or "robust" (MASS::rlm, Huber:
-                                #   down-weights outliers, but with many dissimilarities at exactly 1 it drifts toward the pile and understates differences)
   k_smooth    = 5,              # basis dimension of every 1-D smooth (alpha and beta models): small = smooth curves
   bs_smooth   = "ts",           # thin plate spline WITH shrinkage (the null space is penalised too)
   select      = FALSE,          # TRUE would add a second shrinkage penalty on top of "ts"
@@ -913,27 +919,38 @@ make_pairs <- function(r) {
                                            cbind(S$lon[pairs$j], S$lat[pairs$j])) / 1000
   pairs$d_depth <- abs(S$log10_reads[pairs$i] - S$log10_reads[pairs$j])   # difference in sequencing depth
   pairs$d_unm   <- abs(S$unmapped[pairs$i] - S$unmapped[pairs$j])          # difference in unmapped proportion
-  pairs[, c("rep_id", "type", "bray", "jaccard", "d_elev", "d_lat", "geo_km", "d_depth", "d_unm", "nat_delev", "nat_geo")]
+  pairs$ca <- S$cl[pairs$i]; pairs$cb <- S$cl[pairs$j]                       # the clusters of the two samples (the independent units of the standard errors)
+  pairs[, c("rep_id", "type", "bray", "jaccard", "d_elev", "d_lat", "geo_km", "d_depth", "d_unm", "nat_delev", "nat_geo", "ca", "cb")]
 }
 
 ## ---- B3. Models ---------------------------------------------------------------------------------------
-# LINEAR MODELS, one per replicate, then summarised over the replicates. In every replicate the alpine samples (one per cluster) are
-# compared with the same number of evenly spread non-alpine samples. Three pair types (within lowland = non-alpine, within alpine, alpine vs
-# lowland) each have an intercept and their own slopes. The dissimilarity itself (0-1) is modelled, so effects are in units of dissimilarity
-# (a beta regression does not converge here: many dissimilarities are exactly 1). CFG$beta_fit = "ols": least squares, i.e. the MEAN
-# dissimilarity (recommended); "robust": MASS::rlm (Huber M-estimation), which down-weights the lower tail but, with a pile at exactly 1,
-# drifts toward the pile (tested: with 65-80% of pairs at 1 it returns ~1 and understates differences). Check the open circles in the
-# figures and beta/model_checks.csv. With n_rep replicates there are n_rep fits: curves and slopes are the MEDIAN over the replicates and
-# ribbons / bars the range between the replicates (2.5-97.5%): how stable the result is when the alpine sample of every cluster and the
-# non-alpine samples are drawn again. It is NOT a confidence interval of the population (that would need the sampling of clusters
-# themselves), so read it as a robustness check, together with the size of the effects.
-if (CFG$beta_fit == "robust" && !requireNamespace("MASS", quietly = TRUE)) stop("beta_fit = 'robust' needs the package MASS (r-mass in the conda environment)")
-if (!CFG$beta_fit %in% c("ols", "robust")) stop("CFG$beta_fit must be 'ols' or 'robust'")
+# ONE ordinary LINEAR REGRESSION per metric and model on the pairs of all replicates, with standard errors clustered by cluster (see the header).
+# In every replicate the alpine samples (one per cluster) are compared with the same number of evenly spread non-alpine samples. Three pair
+# types (within lowland = non-alpine, within alpine, alpine vs lowland) each have an intercept and their own slopes. The dissimilarity itself
+# (0-1) is modelled, so effects are in units of dissimilarity (a beta regression does not converge here: many dissimilarities are exactly 1).
+#
+# Cluster-robust variance for dyadic data (Aronow, Samii & Assenova 2015): pairs that share a node (here: a cluster) are dependent, so the
+# scores of all pairs of a node are summed per node
+dyadic_vcov <- function(X, e, node_a, node_b) {
+  s <- X * e                                                      # score of every pair (n x k)
+  bread <- tryCatch(solve(crossprod(X)), error = function(err) NULL)
+  if (is.null(bread)) return(NULL)
+  S <- rowsum(rbind(s, s), c(node_a, node_b))                     # sum of the scores of all pairs of each node
+  meat <- crossprod(S) - crossprod(s)                             # (a pair is in the sums of both of its nodes: count it once)
+  G <- nrow(S)
+  V <- bread %*% meat %*% bread * (G / (G - 1))
+  attr(V, "G") <- G                                               # number of nodes = independent units
+  V
+}
+# Design-matrix rows of a linear model at new data
+design_at <- function(m, newdata) {
+  tt <- delete.response(terms(m))
+  model.matrix(tt, model.frame(tt, newdata, xlev = m$xlevels), contrasts.arg = m$contrasts)
+}
 beta_metrics <- c(bray = "Bray\u2013Curtis", jaccard = "Jaccard (rarefied)")
 beta_vars    <- c(d_elev = "Elevation difference (km)", d_lat = "Latitude difference (\u00B0)")    # shown in the figures; geographic distance is in the
                                                                                                     # elevation model as a covariate, but is not drawn
 curve_model  <- c(d_elev = "elev", d_lat = "lat")      # which model each curve comes from
-qlo <- function(x) unname(quantile(x, 0.025, na.rm = TRUE)); qhi <- function(x) unname(quantile(x, 0.975, na.rm = TRUE))
 
 prep_pairs <- function(P) {
   P <- as.data.frame(P)
@@ -952,10 +969,6 @@ prep_pairs <- function(P) {
 # One intercept and one slope per pair TYPE; depth and unmapped-proportion differences as linear nuisance terms.
 beta_formula <- function(metric, kind)
   as.formula(paste(metric, "~ type + d_depth + d_unm +", if (kind == "elev") "type:d_elev + type:log10_geo" else "type:d_lat + type:d_elev"))
-fit_lin <- function(f, d) tryCatch({
-  if (CFG$beta_fit == "robust") { m <- suppressWarnings(MASS::rlm(f, data = d, maxit = 100)); if (!isTRUE(m$converged)) message("    robust fit did not converge (replicate ", d$rep_id[1], ")"); m }
-  else lm(f, data = d)
-}, error = function(e) { message("    fit failed: ", conditionMessage(e)); NULL })
 clip01 <- function(x) pmin(pmax(x, 0), 1)
 
 # typical values per pair type (the natural median distance and elevation difference of the type, before stratification), and the
@@ -970,12 +983,6 @@ curve_nd <- function(tp, P, v) bind_rows(lapply(levels(P$type), function(ty) {
   nd$.x <- x; nd
 }))
 
-# slopes (per unit of the variable, in dissimilarity units) of one model, per pair type
-slope_table <- function(m) {
-  b <- coef(m); idx <- grep(":(d_elev|d_lat|log10_geo)$", names(b)); if (!length(idx)) return(NULL)
-  nm <- names(b)[idx]
-  data.frame(group = sub(":(d_elev|d_lat|log10_geo)$", "", sub("^type", "", nm)), variable = sub("^.*:", "", nm), slope = unname(b[idx]), row.names = NULL)
-}
 # difference in slope between pair types: within alpine minus within lowland, alpine vs lowland minus within lowland, and minus within alpine
 type_compare <- list(c(2, 1), c(3, 1), c(3, 2))                 # indices into beta_types: first minus second
 
@@ -983,7 +990,7 @@ type_compare <- list(c(2, 1), c(3, 1), c(3, 2))                 # indices into b
 # settings and the drawn samples are the same, so a problem in the models does not cost the distance computation again.
 pairs_key <- list(dist_breaks = CFG$dist_breaks_km, elev_breaks = CFG$elev_breaks_km, n_rep = CFG$n_rep, n_alpine_max = CFG$n_alpine_max,
                   n_pairs = CFG$n_pairs, rare_depth = CFG$rare_depth, n_ids = length(all_ids), ids_chars = sum(nchar(all_ids)), use_sets = use_sets,
-                  thin_m = CFG$thin_m, even_cell_deg = CFG$even_cell_deg, test = TEST_MODE, design = "one-per-cluster-v1")
+                  thin_m = CFG$thin_m, even_cell_deg = CFG$even_cell_deg, test = TEST_MODE, design = "one-per-cluster-v2")
 pairs_file <- out_b("pairs_all.rds")
 P_all <- NULL
 if (REUSE_FITS && file.exists(pairs_file)) {
@@ -1013,58 +1020,63 @@ write.csv(at_one, out_b("share_of_pairs_at_dissimilarity_1.csv"), row.names = FA
 for (i in which(at_one$metric == "bray")) message(sprintf("  %s: %.1f%% of the Bray-Curtis pairs are exactly 1", at_one$type[i], 100 * at_one$share_at_1[i]))
 beta_raw <- P[, c("type", "d_elev", "d_lat", "log10_geo", names(beta_metrics))]     # every pair (for the plots)
 
-# ---- one linear fit per replicate x metric x model; curves, slopes and a check of every fit
-tp <- typ(P); reps <- sort(unique(P$rep_id))
+# ---- the pooled regressions: lines with their 95% interval, the adjusted observed values and a check of every fit
+tp <- typ(P)
 curve_cache <- list(); for (v in names(beta_vars)) curve_cache[[v]] <- curve_nd(tp, P, v)
-curves <- list(); slopes <- list(); checks <- list(); coefs <- list(); adj <- list()
+curves <- list(); adj <- list(); checks <- list(); fits <- list()
 for (metric in names(beta_metrics)) for (kind in c("elev", "lat")) {
-  f <- beta_formula(metric, kind); message("  fitting ", metric, " / ", kind, ": ", deparse(f), " (", length(reps), " replicates)")
-  for (r in reps) {
-    Pr <- P[P$rep_id == r, ]; Pr$type <- droplevels(Pr$type)
-    if (nlevels(Pr$type) < 2) next
-    m <- fit_lin(f, Pr); if (is.null(m)) next
-    key <- paste(metric, kind, r)
-    coefs[[key]] <- data.frame(replicate = r, metric = metric, model = kind, term = names(coef(m)), estimate = unname(coef(m)))
-    for (v in names(curve_model)[curve_model == kind]) {
-      nd <- curve_cache[[v]]; nd$type <- factor(as.character(nd$type), levels = levels(Pr$type))
-      nd <- nd[!is.na(nd$type), ]
-      curves[[paste(key, v)]] <- data.frame(replicate = r, metric = metric, variable = v, type = as.character(nd$type), x = nd$.x, fit = clip01(predict(m, nd)))
-      # the observed dissimilarity of every pair adjusted to the typical values of the other variables (residual + the curve at the pair's x):
-      # binned, these are the open circles that the curve has to run through
-      nd_i <- as.data.frame(tp[match(as.character(Pr$type), as.character(tp$type)), ]); nd_i$type <- Pr$type; nd_i[[v]] <- Pr[[v]]
-      adj[[paste(key, v)]] <- data.frame(metric = metric, variable = v, type = as.character(Pr$type), x = Pr[[v]], y = Pr[[metric]] - fitted(m) + predict(m, nd_i))
-    }
-    sl <- slope_table(m); if (!is.null(sl)) slopes[[key]] <- cbind(replicate = r, metric = metric, model = kind, sl)
-    fv <- tapply(fitted(m), Pr$type, mean); ob <- tapply(Pr[[metric]], Pr$type, mean)       # does the fit reproduce the observed means?
-    checks[[key]] <- data.frame(replicate = r, metric = metric, model = kind, type = names(ob), observed_mean = as.numeric(ob), fitted_mean = as.numeric(fv[names(ob)]),
-                                n_pairs = as.numeric(table(Pr$type)[names(ob)]))
+  f <- beta_formula(metric, kind); message("  fitting ", metric, " / ", kind, ": ", deparse(f), " (", format(nrow(P), big.mark = ","), " pairs)")
+  m <- tryCatch(lm(f, data = P), error = function(e) { message("    fit failed: ", conditionMessage(e)); NULL }); if (is.null(m)) next
+  V <- dyadic_vcov(model.matrix(m), resid(m), P$ca, P$cb); if (is.null(V)) { message("    the covariance matrix could not be computed"); next }
+  key <- paste(metric, kind); fits[[key]] <- list(m = m, V = V, metric = metric, kind = kind)
+  for (v in names(curve_model)[curve_model == kind]) {
+    nd <- curve_cache[[v]]; Xg <- design_at(m, nd); fi <- drop(Xg %*% coef(m)); se <- sqrt(rowSums((Xg %*% V) * Xg))
+    curves[[paste(key, v)]] <- data.frame(metric = metric, variable = v, type = as.character(nd$type), x = nd$.x, fit = clip01(fi), lo = clip01(fi - 1.96 * se), hi = clip01(fi + 1.96 * se))
+    # the observed dissimilarity of every pair adjusted to the typical values of the other variables (residual + the line at the pair's x):
+    # binned, these are the open circles that the line has to run through
+    nd_i <- as.data.frame(tp[match(as.character(P$type), as.character(tp$type)), ]); nd_i$type <- P$type; nd_i[[v]] <- P[[v]]
+    adj[[paste(key, v)]] <- data.frame(metric = metric, variable = v, type = as.character(P$type), x = P[[v]], y = P[[metric]] - fitted(m) + predict(m, nd_i))
   }
+  fv <- tapply(fitted(m), P$type, mean); ob <- tapply(P[[metric]], P$type, mean)       # does the fit reproduce the observed means?
+  checks[[key]] <- data.frame(metric = metric, model = kind, type = names(ob), observed_mean = as.numeric(ob), fitted_mean = as.numeric(fv[names(ob)]), n_pairs = as.numeric(table(P$type)[names(ob)]))
 }
-if (!length(coefs)) stop("no beta model could be fitted: see the messages above")
+if (!length(fits)) stop("no beta model could be fitted: see the messages above")
 checks <- bind_rows(checks); checks$difference <- checks$fitted_mean - checks$observed_mean
 write.csv(checks, out_b("model_checks.csv"), row.names = FALSE)
 worst <- max(abs(checks$difference), na.rm = TRUE)
 message(sprintf("Model check: the fitted mean dissimilarity differs from the observed one by at most %.3f (largest over %d fits x pair types)%s", worst, nrow(checks),
-                if (worst > 0.05) "  -> LARGER THAN 0.05: look at beta/model_checks.csv, a fit is probably wrong (a robust fit may differ slightly from the mean: it down-weights the tail)" else ""))
-curves <- bind_rows(curves); slopes <- bind_rows(slopes); adj_all <- bind_rows(adj)
-write.csv(bind_rows(coefs), out_b("coefficients_per_replicate.csv"), row.names = FALSE)
-
-# curves: median over the replicates, ribbon = 2.5-97.5% between the replicates
-preds_o <- curves %>% group_by(metric, variable, type, x) %>% summarise(lo = qlo(fit), hi = qhi(fit), fit = median(fit), .groups = "drop") %>% as.data.frame()
+                if (worst > 0.02) "  -> LARGER THAN 0.02: look at beta/model_checks.csv, a fit may be wrong" else ""))
+preds_o <- bind_rows(curves); adj_all <- bind_rows(adj)
 write.csv(preds_o, out_b("predicted_curves_overall.csv"), row.names = FALSE)
-# slopes (dissimilarity units per unit of the variable): median and range over the replicates; the differences between pair types the same way
-summ_rep <- function(d, val) d %>% summarise(median = median(.data[[val]]), lo = qlo(.data[[val]]), hi = qhi(.data[[val]]),
-                                             share_of_replicates_above_0 = mean(.data[[val]] > 0), n_replicates = n(), .groups = "drop")
-write.csv(slopes %>% group_by(metric, model, group, variable) %>% summ_rep("slope") %>% rename(slope = median), out_b("linear_effects.csv"), row.names = FALSE)
-slope_con <- bind_rows(lapply(type_compare, function(cp) {
-  a <- slopes[slopes$group == beta_types[cp[1]], c("replicate", "metric", "model", "variable", "slope")]
-  b <- slopes[slopes$group == beta_types[cp[2]], c("replicate", "metric", "model", "variable", "slope")]
-  d <- merge(a, b, by = c("replicate", "metric", "model", "variable"), suffixes = c("_1", "_2"))
-  if (!nrow(d)) return(NULL)
-  d$diff <- d$slope_1 - d$slope_2; d$contrast <- sprintf("%s minus %s", beta_types[cp[1]], beta_types[cp[2]]); d
+
+# ---- the tests: coefficients, slopes per pair type and differences between pair types (t-tests, clusters - 1 degrees of freedom)
+G_cl <- attr(fits[[1]]$V, "G"); dfree <- max(G_cl - 1, 1)
+message(sprintf("Tests: %s pairs from %s clusters (the independent units of the standard errors)", format(nrow(P), big.mark = ","), format(G_cl, big.mark = ",")))
+tfun <- function(est, se) data.frame(estimate = est, se = se, lo = est - qt(0.975, dfree) * se, hi = est + qt(0.975, dfree) * se, p = 2 * pt(-abs(est / se), dfree))
+coef_all <- bind_rows(lapply(fits, function(ft) { m <- ft$m; b <- coef(m)
+  cbind(metric = ft$metric, model = ft$kind, term = names(b), tfun(unname(b), sqrt(diag(ft$V))), p_naive_lm_NOT_VALID = unname(summary(m)$coefficients[names(b), 4]), row.names = NULL) }))
+write.csv(coef_all, out_b("model_coefficients.csv"), row.names = FALSE)
+slope_tab <- bind_rows(lapply(fits, function(ft) { b <- coef(ft$m); idx <- grep(":(d_elev|d_lat|log10_geo)$", names(b)); nm <- names(b)[idx]
+  cbind(metric = ft$metric, model = ft$kind, group = sub(":(d_elev|d_lat|log10_geo)$", "", sub("^type", "", nm)), variable = sub("^.*:", "", nm),
+        tfun(unname(b[idx]), sqrt(diag(ft$V)[idx])), p_naive_lm_NOT_VALID = unname(summary(ft$m)$coefficients[nm, 4]), row.names = NULL) }))
+write.csv(slope_tab, out_b("linear_effects.csv"), row.names = FALSE)               # slopes (dissimilarity per unit of the variable) per pair type
+slope_con <- bind_rows(lapply(fits, function(ft) {
+  b <- coef(ft$m); nm <- names(b); V <- ft$V
+  vars <- unique(sub("^.*:", "", nm[grepl(":", nm)]))
+  bind_rows(lapply(type_compare, function(cp) bind_rows(lapply(vars, function(vr) {
+    i1 <- paste0("type", beta_types[cp[1]], ":", vr); i2 <- paste0("type", beta_types[cp[2]], ":", vr)
+    if (!all(c(i1, i2) %in% nm)) return(NULL)
+    v <- setNames(numeric(length(nm)), nm); v[i1] <- 1; v[i2] <- -1
+    cbind(metric = ft$metric, model = ft$kind, variable = vr, g1 = beta_types[cp[1]], g2 = beta_types[cp[2]], tfun(sum(v * b), sqrt(drop(t(v) %*% V %*% v))), row.names = NULL)
+  }))))
 }))
-if (!is.null(slope_con) && nrow(slope_con)) write.csv(slope_con %>% group_by(metric, model, variable, contrast) %>% summ_rep("diff") %>% rename(slope_difference = median),
-                                                      out_b("linear_effect_type_contrasts.csv"), row.names = FALSE)
+write.csv(slope_con, out_b("linear_effect_type_contrasts.csv"), row.names = FALSE)    # differences between the slopes of two pair types
+pfmt <- function(p) format.pval(p, digits = 2, eps = 1e-16)
+for (mt in names(beta_metrics)) for (kind in c("elev", "lat")) {
+  d <- slope_tab[slope_tab$metric == mt & slope_tab$model == kind & slope_tab$variable == c(elev = "d_elev", lat = "d_lat")[[kind]], ]
+  if (nrow(d)) message(sprintf("  %s, slope of %s per %s: %s", beta_metrics[[mt]], c(elev = "the elevation difference", lat = "the latitude difference")[[kind]], c(elev = "km", lat = "degree")[[kind]],
+                               paste(sprintf("%s %+.4f (p %s)", d$group, d$estimate, pfmt(d$p)), collapse = "; ")))
+}
 
 ## ---- B4. Beta-diversity figures ----------------------------------------------------------------------------------------
 # Zoom of the y axis: dissimilarities pile up near 1 with a long tail towards 0, which flattens the curves. The window starts
@@ -1085,8 +1097,7 @@ y_breaks <- function(l) { b <- scales::extended_breaks()(l); b[b <= 1 + 1e-9] } 
 y_scale  <- scale_y_continuous(expand = expansion(mult = c(0.03, 0.06)), breaks = y_breaks)
 thin_txt <- sprintf("Each replicate: one random alpine sample per cluster (BioProject / location) and the same number of non-alpine samples, evenly spread over latitude / longitude and at most one per %g m", CFG$thin_m)
 pts_note <- if (CFG$beta_points_max > 0) sprintf("points = a random subset of %s pairs (the y axis is zoomed on the bulk of the pairs: the few with a much lower dissimilarity are not drawn and ribbons are clipped at the lower edge, but all pairs are in the models)", format(CFG$beta_points_max, big.mark = ",")) else "pairs not drawn"
-rob_txt <- sprintf("%s linear models fitted separately in each replicate; lines = median over the replicates, ribbons = range between replicates (2.5-97.5%%), open circles = observed dissimilarity adjusted to the typical values of the other variables (mean in 8 bins of the x variable)",
-                   if (CFG$beta_fit == "robust") "robust (Huber)" else "ordinary least-squares")
+rob_txt <- "ordinary linear regression on the pairs of all replicates (lines = regression, ribbons = 95% interval, standard errors cluster-robust for pair data: pairs sharing a cluster are dependent), open circles = observed dissimilarity adjusted to the typical values of the other variables (mean in 8 bins of the x variable); stars = tests of the slope of each pair type and of the differences between two slopes (L = within lowland, A = within alpine, X = alpine vs lowland; *** p < 0.001, ** p < 0.01, * p < 0.05, ns; not adjusted for multiple tests)"
 lab_beta <- function(d) {
   d$metric   <- factor(beta_metrics[d$metric], levels = beta_metrics)
   d$variable <- factor(beta_vars[d$variable], levels = beta_vars)
@@ -1103,7 +1114,18 @@ pair_points <- function(vars, metrics, max_n) {
   if (max_n <= 0) ob[0, ] else if (nrow(ob) > max_n) ob[sample.int(nrow(ob), max_n), ] else ob
 }
 
-# One panel of the effects: one metric against one pair variable, a curve per pair type
+# the slopes of the three pair types and the differences between them as two lines of text for a panel (elevation: per km; latitude: per 10 degrees)
+beta_annot <- function(metric, v) {
+  kind <- curve_model[[v]]
+  s <- slope_tab[slope_tab$metric == metric & slope_tab$model == kind & slope_tab$variable == v, ]
+  d <- slope_con[slope_con$metric == metric & slope_con$model == kind & slope_con$variable == v, ]
+  if (!nrow(s)) return("")
+  fac <- if (v == "d_lat") 10 else 1; ts <- c("Within lowland" = "L", "Within alpine" = "A", "Alpine vs lowland" = "X")
+  paste(paste0("Slope per ", if (v == "d_lat") "10 degrees" else "km", ":  ", paste(sprintf("%s %+.3f %s", ts[s$group], fac * s$estimate, stars(s$p)), collapse = "   ")),
+        if (nrow(d)) paste0("Differences:  ", paste(sprintf("%s-%s %+.3f %s", ts[d$g1], ts[d$g2], fac * d$estimate, stars(d$p)), collapse = "   ")), sep = "\n")
+}
+
+# One panel of the effects: one metric against one pair variable, a line per pair type
 beta_overall_panel <- function(metric, v, tag, subtitle) {
   pm <- preds_o[preds_o$metric == metric & preds_o$variable == v, ]
   if (!nrow(pm)) return(NULL)
@@ -1118,6 +1140,7 @@ beta_overall_panel <- function(metric, v, tag, subtitle) {
     geom_point(data = ob, aes(x, y, colour = type), size = 0.35, alpha = CFG$beta_point_alpha, shape = 16) +
     geom_line(data = pm, aes(x, mid, colour = type), linewidth = 1.1) +
     geom_point(data = bn, aes(x, y, colour = type), shape = 21, fill = "white", size = 2.6, stroke = 1.1) +
+    annotate("label", x = -Inf, y = -Inf, label = beta_annot(metric, v), hjust = -0.03, vjust = -0.15, size = 2.7, lineheight = 1.1, fill = "white", alpha = 0.8, linewidth = 0) +
     type_scales + y_scale +
     labs(tag = tag, x = beta_vars[[v]], y = paste(beta_metrics[[metric]], "dissimilarity"), subtitle = subtitle) +
     theme_fig + theme(plot.subtitle = element_text(size = 9, colour = "grey30"))
@@ -1168,7 +1191,7 @@ if (RUN_ALPHA && RUN_BETA) {
     "C: Bray-Curtis dissimilarity between pairs of samples (colour = pair type: within non-alpine, within alpine, between alpine and non-alpine)",
     "against the difference in elevation (left; accounting for geographic distance) and the difference in latitude (right; accounting for the elevation difference): one effect per pair type.",
     sprintf("%s; up to %d pairs per pair type and replicate (random within classes of geographic distance and elevation difference), %d replicates.", thin_txt, CFG$n_pairs, CFG$n_rep),
-    paste0("Effects: ", rob_txt, " (the ribbons show how much the result depends on which samples are drawn, not a confidence interval of the population)."),
+    paste0("Effects: ", rob_txt, "."),
     paste0(pts_note, ". "), alpha_txt,
     "Jaccard: Supplementary Figure 1.")
   assemble_fig(file.path(out_folder, "fig2_alpha_beta_gradients.png"),

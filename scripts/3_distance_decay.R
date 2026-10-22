@@ -12,57 +12,51 @@
 #     are linked), at most one per thin_m metres (no pairs at 0 km from different studies), and cuts every group down to the SAME
 #     number of samples (the smallest group decides, at most n_per_group), EVENLY over latitude / longitude cells (even_cell_deg):
 #     one sample per cell in turn. So the groups have the same size, no study or place dominates, and no region (Europe, North
-#     America) dominates a group.
-#   * Up to n_pairs pairs per group, drawn at random WITHIN classes of geographic distance (dist_breaks_km), shared as evenly as
-#     possible over the classes: random pairs are mostly thousands of km apart, so short distances would hardly be represented.
-#     Stratifying on the predictor does not bias the fitted curve; it makes it well determined over the whole range.
+#     America) dominates a group. The replicates only redraw which sample represents a cluster and which pairs are used.
+#   * Up to n_pairs pairs per group and replicate, drawn at random WITHIN classes of geographic distance (dist_breaks_km), shared as
+#     evenly as possible over the classes: random pairs are mostly thousands of km apart, so short distances would hardly be
+#     represented. Stratifying on the predictor does not bias the fitted line; it makes it well determined over the whole range.
 #   * Bray-Curtis (relative abundances) and Jaccard (presence/absence after rarefaction to rare_depth reads), computed only for the
 #     drawn pairs from sparse matrices (checked against vegan::vegdist in TEST_MODE).
-#   * One LINEAR model with INTERACTIONS per replicate and metric on the dissimilarity itself (0-1; a beta regression does not
-#     converge, many dissimilarities are exactly 1): dissimilarity ~ group * (log10 distance - log10 of the reference distance) + linear
-#     nuisance terms for the differences in sequencing depth and unmapped proportion (df_dist > 1: a natural spline instead of the line).
-#     Distance is centred at the reference distance (1,000 km), so the coefficients read directly:
+#
+# MODEL AND STATISTICS (panels A, B; tables/model_coefficients.csv, tables/tests.csv)
+#   ONE ordinary linear regression per metric on the pairs of ALL replicates: dissimilarity ~ group * (log10 distance - log10 of the
+#   reference distance) + linear nuisance terms for the differences in sequencing depth and unmapped proportion (a straight line per group;
+#   df_dist > 1 gives a natural spline instead). Distance is centred at the reference distance (1,000 km), so the coefficients read directly:
 #       (Intercept)               dissimilarity of the reference group (lowland) at 1,000 km
 #       group<G>                  <G> minus lowland: the difference in LEVEL at 1,000 km
 #       distance                  rise of the lowland dissimilarity per 10-fold distance
 #       group<G>:distance         <G> minus lowland: the difference in the RISE per 10-fold distance (the interaction)
-#     (tables/model_coefficients.csv: pooled over the replicates).
+#   Alpine - peri-alpine is the difference of the two group terms (tables/tests.csv, with the other two). The lines of the figure are this
+#   regression (exactly straight), the ribbons its 95% interval, the open circles the observed dissimilarity (adjusted to the median depth /
+#   unmapped differences) in 8 bins of distance.
+#   Pairs that share a sample, and samples of one cluster, are not independent: an ordinary regression treats thousands of pairs as thousands
+#   of observations and gives far too small p-values (simulation: 63-67% false positives at p < 0.05 for a true null). The estimates are the
+#   ordinary least-squares ones; their standard errors are cluster-robust for DYADIC data (Aronow, Samii & Assenova 2015: the scores of all
+#   pairs that share a CLUSTER are summed), so the number of independent units is the number of clusters, however many replicates there are.
+#   In a simulation this had the correct 5% false positives and about twice the power of testing every replicate separately and averaging;
+#   more replicates than ~20 add nothing (the replicates redraw from the same clusters). t-tests with (clusters - 1) degrees of freedom. The p-values of the ordinary
+#   regression are also in the coefficient table (column p_naive_lm_NOT_VALID), for comparison only. No adjustment for multiple tests.
+#   LIMITS: the tests cannot see spatial autocorrelation between DIFFERENT clusters (neighbouring regions resemble each other): judge
+#   robustness by the size of the effects.
 #
-# STATISTICAL TESTS (tables/model_coefficients.csv, tables/tests.csv; stars in the figures)
-#   The coefficients of the linear model above ARE the tests: the group terms (difference in level at the reference distance from the
-#   reference group, lowland), the distance term (rise of the reference group per 10-fold distance) and the group x distance interactions
-#   (difference in that rise). Alpine - peri-alpine is the difference of the two group terms (tables/tests.csv, with the other two).
-#   Pairs that share a sample are not independent: an ordinary regression treats thousands of pairs as thousands of observations and
-#   gives far too small p-values (simulation: 63-67% false positives at p < 0.05 for a true null). The coefficients are therefore tested
-#   with the SAME ordinary least-squares estimates but standard errors that are cluster-robust for DYADIC data (Aronow, Samii & Assenova
-#   2015: the scores of all pairs that share a sample are summed). The 20 replicates are pooled: the estimate is their mean, its standard
-#   error the root mean square of the within-replicate standard errors (the averaging is not credited: the replicates redraw from the same
-#   samples; in a simulation about 2% false positives under a true null). The p-values of the ordinary regression are also in the
-#   coefficient table (column p_naive_lm_NOT_VALID), for comparison only. p-values are NOT adjusted for multiple tests.
-#   LIMITS: the tests cannot see spatial autocorrelation between DIFFERENT samples (neighbouring regions resemble each other): judge
-#   robustness by the size of the effects and their consistency between replicates.
-#
-# MAP (panel C): how distinct is the alpine community of a region from the alpine communities of the OTHER regions? Regions = groups of
-#   alpine clusters closer than region_km (average-linkage clustering of the cluster coordinates: a mountain range is a few points) with at
-#   least min_region_n alpine samples. In every replicate (one random alpine sample per cluster, ALL clusters) the mean Bray-Curtis
-#   dissimilarity to the alpine samples of other regions is computed and its residual from one alpine distance decay over all between-region
-#   pairs: > 0 = more distinct than the distance to the other regions explains (an "island"), < 0 = more similar. Median over the replicates
-#   (tables/map_regions.csv also has the raw dissimilarity). INSET: do the distinct regions tend to be the high ones? Distinctiveness against
-#   the mean elevation of the region, both after removing what latitude explains (an ordinary regression on the regions, partial plot).
+# NMDS (panel C): non-metric multidimensional scaling of the Bray-Curtis dissimilarities of ALL alpine samples (nmds_n = Inf) and the same number
+#   of lowland samples spread evenly over latitude / longitude (at most one per thin_m metres), coloured: lowland, and alpine by continent (rule-based
+#   boxes in continent_of(): check tables/nmds_samples.csv), with 95% ellipses. Computing Bray-Curtis between ~9,000 samples over all OTUs would take
+#   hours: the distances use the nmds_top_otus most abundant OTUs (a few minutes; the log gives the expected time). The ordination starts from a PCA.
 #
 # SUPPLEMENTARY (figS5_latitude_zones.png): the same analysis within the two hemispheres (lat_breaks = 0: southern and northern
-#   hemisphere): every hemisphere has its own matched groups, curves and tests. A group needs min_zone_clusters clusters
-#   in a zone to be analysed there; zones without enough samples are left out.
+#   hemisphere): every hemisphere has its own matched groups, lines and tests. A group needs min_zone_clusters clusters in it; hemispheres
+#   without enough samples are left out.
 #
-# FIGURE (in <out_folder>)  fig3_distance_decay.png : A, B = Bray-Curtis / Jaccard dissimilarity against distance per group (lines =
-#   median over the replicates, ribbons = range between replicates, open circles = observed dissimilarity adjusted to the median depth /
-#   unmapped differences, mean in 8 bins of distance; stars = tests); C = map of the distinctiveness of alpine regions with an inset.
-# TABLES (in <out_folder>/tables)  model_coefficients.csv, tests.csv, curves.csv, map_regions.csv, model_checks.csv,
+# FIGURE (in <out_folder>)  fig3_distance_decay.png : A, B = Bray-Curtis / Jaccard dissimilarity against distance per group (with the tests);
+#   C = NMDS.
+# TABLES (in <out_folder>/tables)  model_coefficients.csv, tests.csv, curves.csv, nmds_samples.csv, nmds_summary.csv, model_checks.csv,
 #   samples_per_replicate.csv, pair_counts.csv, distance_range_per_group.csv, share_of_pairs_at_dissimilarity_1.csv
 #
-# Input : <data_folder>/sample_data_filtered.tsv (needs perialpine_alpine and cluster_id: rerun prepare_microbeatlas_data if absent),
-#         the filtered BIOM written by microbeatlas_filter_data.R and <data_folder>/other_data.csv (terrain: elevation of the samples)
-# Usage : Rscript 3_distance_decay.R [sample_table] [filtered_biom] [other_data.csv] [out_folder]
+# Input : <data_folder>/sample_data_filtered.tsv (needs perialpine_alpine and cluster_id: rerun prepare_microbeatlas_data if absent)
+#         and the filtered BIOM written by microbeatlas_filter_data.R
+# Usage : Rscript 3_distance_decay.R [sample_table] [filtered_biom] [out_folder]
 #         Snakemake passes the exact paths (all file names are defined in the Snakefile only)
 # =============================================================================
 
@@ -87,17 +81,12 @@ results_default <- file.path(dirname(data_folder), "results")
 sample_table  <- if (length(args) >= 1) as.character(args[1]) else file.path(data_folder, "sample_data_filtered.tsv")
 filtered_biom <- if (length(args) >= 2) as.character(args[2]) else
   file.path(data_folder, "microbeatlas", "otuTable_soilCurated_OTU97_nextMAPrelease_filtered.biom")
-env_file      <- if (length(args) >= 3) as.character(args[3]) else file.path(data_folder, "other_data.csv")
-out_folder    <- if (length(args) >= 4) as.character(args[4]) else file.path(results_default, "3_distance_decay")
+out_folder    <- if (length(args) >= 3) as.character(args[3]) else file.path(results_default, "3_distance_decay")
 
 CFG <- list(
   sample_file = sample_table,
   biom_file   = filtered_biom,  # written by the Snakemake rule filter_biom
   biom_id     = "Accessions",   # column of the sample table that matches the BIOM sample IDs
-  env_file    = env_file,       # other_data.csv (terrain, written by download_others.py): the elevation of the samples, for the inset of the map
-  env_id      = "site",         # ID column in env_file ...
-  sample_id   = "Sample_acc",   # ... that matches this column of the sample table
-  env_elev    = "elevation_m",  # elevation (metres) column in env_file
   group_col   = "perialpine_alpine",                       # Lowland / Perialpine / Alpine (microbeatlas_filter_data.R)
   groups      = c("Lowland", "Perialpine", "Alpine"),      # order of the groups in tables and figures
   n_rep       = 20,             # replicates: each draws the samples (one per cluster, even cut) and the pairs again from scratch
@@ -113,16 +102,16 @@ CFG <- list(
   lat_breaks  = 0,              # latitude zones of the supplementary figure (degrees): below 0 and above 0 = the two hemispheres
   zone_names  = c("Southern hemisphere", "Northern hemisphere"),
   min_zone_clusters = 15,       # a group needs at least this many clusters in a zone to be analysed there
-  region_km   = 1500,           # alpine regions of the map: clusters closer than this (km, average linkage) form one region (a range = a few points)
-  min_region_n = 3,             # a region needs at least this many alpine samples (clusters) to appear on the map
-  map_max_samples = 800,        # at most this many alpine samples in the all-pairs dissimilarity of the map (a random subset above that)
+  nmds_n      = Inf,            # NMDS: this many alpine samples (Inf = all of them) and the same number of evenly spaced lowland samples
+  nmds_top_otus = 2000,         # NMDS: Bray-Curtis on the most abundant OTUs (all OTUs would take hours for ~9,000 samples; the time grows with samples^2 x OTUs)
   points_max  = 40000,          # pairs drawn as points (random subset; the models use all pairs)
   point_alpha = 0.05,
-  cols        = c(Lowland = "#7C9885", Perialpine = "#CC79A7", Alpine = "#2B6CB0")
+  cols        = c(Lowland = "#7C9885", Perialpine = "#CC79A7", Alpine = "#2B6CB0"),
+  cols_continent = c(Europe = "#0072B2", Asia = "#D55E00", "North America" = "#E69F00", "South America" = "#CC79A7", Africa = "#B8860B", Oceania = "#56B4E9", Antarctica = "#555555")
 )
 if (TEST_MODE) {
   out_folder <- paste0(out_folder, "_TEST")
-  CFG$n_per_group <- 60; CFG$n_rep <- 1; CFG$n_pairs <- 300; CFG$min_zone_clusters <- 8
+  CFG$n_per_group <- 60; CFG$n_rep <- 1; CFG$n_pairs <- 300; CFG$min_zone_clusters <- 8; CFG$nmds_n <- 150; CFG$nmds_top_otus <- 300
 }
 dir.create(file.path(out_folder, "tables"), recursive = TRUE, showWarnings = FALSE)
 out_t <- function(...) file.path(out_folder, "tables", ...)
@@ -198,44 +187,32 @@ assemble_fig <- function(file, rows, leg, caption, width, height, row_heights = 
 
 # BEGIN STATS
 # ---- Statistical tests for pair data ---------------------------------------------------------------------------------------------
-# Pairs that share a sample are NOT independent (a sample with an unusual community is unusual in all its pairs), so ordinary
+# Pairs that share a sample or a cluster are NOT independent (a cluster with an unusual community is unusual in all its pairs), so ordinary
 # standard errors of a regression on pairs are far too small. The variance used here is the cluster-robust variance for dyadic data
-# (Aronow, Samii & Assenova 2015): the scores of all pairs that share a sample are summed per sample.
+# (Aronow, Samii & Assenova 2015): the scores of all pairs that share a node (here: a cluster) are summed per node.
 dyadic_vcov <- function(X, e, node_a, node_b) {
   s <- X * e                                                      # score of every pair (n x k)
   bread <- tryCatch(solve(crossprod(X)), error = function(err) NULL)
   if (is.null(bread)) return(NULL)
-  S <- rowsum(rbind(s, s), c(node_a, node_b))                     # sum of the scores of all pairs of each sample
-  meat <- crossprod(S) - crossprod(s)                             # (a pair is in the sums of both of its samples: count it once)
+  S <- rowsum(rbind(s, s), c(node_a, node_b))                     # sum of the scores of all pairs of each node
+  meat <- crossprod(S) - crossprod(s)                             # (a pair is in the sums of both of its nodes: count it once)
   G <- nrow(S)
-  bread %*% meat %*% bread * (G / (G - 1))
+  V <- bread %*% meat %*% bread * (G / (G - 1))
+  attr(V, "G") <- G                                               # number of nodes = independent units
+  V
 }
 # Design-matrix rows of a linear model at new data (also for natural splines: the knots of the fit are used)
 design_at <- function(m, newdata) {
   tt <- delete.response(terms(m))
   model.matrix(tt, model.frame(tt, newdata, xlev = m$xlevels), contrasts.arg = m$contrasts)
 }
-# Combine the estimates of the replicates: the pooled estimate is the MEAN over the replicates; its standard error is the root mean square
-# of the within-replicate (dyadic-robust) standard errors, i.e. the averaging over replicates is NOT credited (the replicates redraw
-# from the same samples, so they are not independent). Validated by simulation: about 2% false positives at p < 0.05 under a true
-# null (conservative), 5% for a single replicate. Also given: the range of the estimates between replicates and the share of
-# replicates in which the test alone gives p < 0.05.
-pool_replicates <- function(est, se) {
-  ok <- is.finite(est) & is.finite(se); est <- est[ok]; se <- se[ok]; m <- length(est)
-  if (m < 1) return(data.frame(estimate = NA_real_, se = NA_real_, lo = NA_real_, hi = NA_real_, p = NA_real_, range_lo = NA_real_, range_hi = NA_real_, share_replicates_p_below_0.05 = NA_real_, n_replicates = 0))
-  q <- mean(est); s_w <- sqrt(mean(se^2))
-  data.frame(estimate = q, se = s_w, lo = q - qnorm(0.975) * s_w, hi = q + qnorm(0.975) * s_w, p = 2 * pnorm(-abs(q / s_w)),
-             range_lo = unname(quantile(est, 0.025)), range_hi = unname(quantile(est, 0.975)),
-             share_replicates_p_below_0.05 = mean(2 * pnorm(-abs(est / se)) < 0.05), n_replicates = m)
-}
 # END STATS
-
 
 ## ---- 1. Data ------------------------------------------------------------------------------------------------------
 # The sample table is a TSV without quoting (its text fields contain commas): read it with quote = "" so that a stray double
 # quote cannot swallow the following lines; fill = FALSE makes a misaligned row an error.
 raw <- read.delim(CFG$sample_file, quote = "", comment.char = "", stringsAsFactors = FALSE, check.names = FALSE, fill = FALSE)
-required <- c("Longitude", "Latitude", CFG$group_col, "cluster_id", "alpha_total_n_reads", "unmapped_raw_counts", "total_raw_counts", CFG$biom_id, CFG$sample_id)
+required <- c("Longitude", "Latitude", CFG$group_col, "cluster_id", "alpha_total_n_reads", "unmapped_raw_counts", "total_raw_counts", CFG$biom_id)
 miss <- setdiff(required, names(raw))
 if (length(miss)) stop("Missing columns in ", CFG$sample_file, ": ", paste(miss, collapse = ", "),
                        "  (perialpine_alpine and cluster_id are written by microbeatlas_filter_data.R: rerun prepare_microbeatlas_data)")
@@ -248,7 +225,7 @@ local({
          " Perialpine): rerun prepare_microbeatlas_data so that it is recomputed")
 })
 meta <- raw %>%
-  transmute(id = .data[[CFG$biom_id]], sample_acc = as.character(.data[[CFG$sample_id]]), group = factor(.data[[CFG$group_col]], levels = CFG$groups),
+  transmute(id = .data[[CFG$biom_id]], group = factor(.data[[CFG$group_col]], levels = CFG$groups),
             lon = Longitude, lat = Latitude, cl = as.character(cluster_id),
             reads = alpha_total_n_reads, log10_reads = log10(alpha_total_n_reads),
             unmapped = unmapped_raw_counts / total_raw_counts) %>%
@@ -256,16 +233,6 @@ meta <- raw %>%
          is.finite(unmapped), !is.na(group), !is.na(id))
 no_cl <- is.na(meta$cl) | !nzchar(meta$cl); meta$cl[no_cl] <- paste0("none", seq_len(sum(no_cl)))      # a sample without a cluster is its own cluster
 meta$zone <- cut(meta$lat, c(-Inf, CFG$lat_breaks, Inf), labels = CFG$zone_names, right = FALSE)
-# elevation of the samples (terrain table), for the inset of the map; without it the inset is left out
-meta$elev_m <- NA_real_
-if (file.exists(CFG$env_file)) {
-  env <- read.csv(CFG$env_file, stringsAsFactors = FALSE)
-  if (all(c(CFG$env_id, CFG$env_elev) %in% names(env))) {
-    env <- env[!duplicated(env[[CFG$env_id]]), ]
-    meta$elev_m <- suppressWarnings(as.numeric(env[[CFG$env_elev]][match(meta$sample_acc, env[[CFG$env_id]])]))
-    message(sprintf("Elevation found for %.1f%% of the samples (%s)", 100 * mean(is.finite(meta$elev_m)), CFG$env_file))
-  } else message("  ", CFG$env_file, " lacks column(s) ", CFG$env_id, " / ", CFG$env_elev, ": no elevation inset")
-} else message("  no terrain table (", CFG$env_file, "): no elevation inset")
 cat("\nSamples and clusters per group:\n")
 print(meta %>% group_by(group) %>% summarise(samples = n(), clusters = n_distinct(cl), .groups = "drop") %>% as.data.frame())
 cat("\nClusters per group and latitude zone:\n")
@@ -323,24 +290,34 @@ for (an in names(analyses)) {
 n_main <- sum(analyses$all$sel[[1]]$group == analyses$all$groups[1])
 if (n_main < 100) warning("fewer than 100 samples per group: the distance decays will be poorly determined")
 
-# Samples of the map: ALL alpine clusters, one random sample each (a different one in every replicate), at most one per thin_m metres
-# Regions: the alpine clusters are grouped by average-linkage clustering of their coordinates (clusters closer than region_km: a mountain
-# range is one or a few regions), once for all replicates
-alp_all <- meta[meta$group == "Alpine", ]
-cl_tab <- alp_all %>% group_by(cl) %>% summarise(lon = mean(lon), lat = mean(lat), elev_m = mean(elev_m, na.rm = TRUE), .groups = "drop") %>% as.data.frame()
-cl_tab$elev_m[is.nan(cl_tab$elev_m)] <- NA_real_
-cl_tab$region <- if (nrow(cl_tab) > 1) paste0("R", cutree(hclust(as.dist(geosphere::distm(cbind(cl_tab$lon, cl_tab$lat), fun = geosphere::distHaversine) / 1000), "average"), h = CFG$region_km)) else "R1"
-region_of_cl <- setNames(cl_tab$region, cl_tab$cl)
-message(sprintf("Alpine regions: %d alpine clusters grouped into %d regions (clusters closer than %g km); regions with at least %d clusters: %d",
-                nrow(cl_tab), length(unique(cl_tab$region)), CFG$region_km, CFG$min_region_n, sum(table(cl_tab$region) >= CFG$min_region_n)))
-map_sets <- lapply(seq_len(CFG$n_rep), function(r) {
-  set.seed(5000 + r)
-  a <- meta[meta$group == "Alpine", ]; a <- a[sample.int(nrow(a)), ]; a <- a[!duplicated(a$cl), ]; a <- a[thin_sites(a$lat, a$lon, CFG$thin_m), ]
-  if (nrow(a) > CFG$map_max_samples) a <- a[sample.int(nrow(a), CFG$map_max_samples), ]
-  a$region <- unname(region_of_cl[a$cl]); a
-})
+# NMDS samples: ALL alpine samples (nmds_n = Inf) and the same number of lowland samples, spread evenly over latitude / longitude cells
+# (at most one per thin_m metres); a smaller nmds_n cuts the alpine samples down evenly as well
+# Continents by boxes of latitude / longitude, evaluated in this order (a rule of thumb: check tables/nmds_samples.csv and edit the boxes if
+# an alpine sample is on the wrong continent; samples that fit nowhere are "Other")
+continent_of <- function(lat, lon) {
+  out <- rep("Other", length(lat))
+  set <- function(cond, name) out[cond & out == "Other"] <<- name
+  set(lat < -60, "Antarctica")
+  set(lon >= -161 & lon <= -154 & lat >= 18 & lat <= 23, "Oceania")                                  # Hawaii
+  set(lon >= -170 & lon <= -50 & lat >= 12, "North America")                                         # incl. Mexico, Central America north of 12 N, Greenland west of 50 W
+  set(lon >= -85 & lon <= -30 & lat < 12, "South America")
+  set((lon >= 110 & lat < -9) | (lon >= 140 & lat < 0), "Oceania")
+  set((lon >= -20 & lon <= 34 & lat >= -36 & lat <= 37) | (lon > 34 & lon <= 52 & lat >= -36 & lat <= 12), "Africa")
+  set(lat >= 35 & lon >= -25 & lon <= 45 & !(lon >= 26 & lat < 43), "Europe")                        # the Caucasus is counted to Europe, Anatolia to Asia
+  set(lat > -10 & lon > 26, "Asia")                                                                  # incl. the Middle East, the Himalaya, Siberia, Japan
+  out
+}
+set.seed(9000)
+alp_pool <- meta[meta$group == "Alpine", ]; low_pool <- meta[meta$group == "Lowland", ]
+if (nrow(low_pool) > 3 * min(CFG$nmds_n, nrow(alp_pool))) low_pool <- low_pool[even_order(low_pool$lat, low_pool$lon)[seq_len(3 * min(CFG$nmds_n, nrow(alp_pool)))], ]   # thinning is slow on many samples
+low_pool <- low_pool[thin_sites(low_pool$lat, low_pool$lon, CFG$thin_m), ]
+n_nmds <- min(CFG$nmds_n, nrow(alp_pool), nrow(low_pool))
+alp_nmds <- alp_pool[even_order(alp_pool$lat, alp_pool$lon)[seq_len(n_nmds)], ]
+low_nmds <- low_pool[even_order(low_pool$lat, low_pool$lon)[seq_len(n_nmds)], ]
+alp_nmds$continent <- continent_of(alp_nmds$lat, alp_nmds$lon); low_nmds$continent <- "Lowland"
+message(sprintf("NMDS samples: %d alpine (%s) and %d evenly spaced lowland samples", nrow(alp_nmds), paste(sprintf("%s %d", names(table(alp_nmds$continent)), table(alp_nmds$continent)), collapse = ", "), nrow(low_nmds)))
 
-all_ids <- unique(c(unlist(lapply(analyses, function(a) unlist(lapply(a$sel, `[[`, "id")))), unlist(lapply(map_sets, `[[`, "id"))))
+all_ids <- unique(c(unlist(lapply(analyses, function(a) unlist(lapply(a$sel, `[[`, "id")))), alp_nmds$id, low_nmds$id))
 message(length(all_ids), " distinct samples across all analyses and replicates")
 
 to_sparse <- function(m) {
@@ -447,24 +424,9 @@ make_pairs <- function(S0, seed) {
   pairs$geo_km <- geosphere::distHaversine(cbind(S$lon[pairs$i], S$lat[pairs$i]), cbind(S$lon[pairs$j], S$lat[pairs$j])) / 1000
   pairs$d_depth <- abs(S$log10_reads[pairs$i] - S$log10_reads[pairs$j])   # difference in sequencing depth
   pairs$d_unm   <- abs(S$unmapped[pairs$i] - S$unmapped[pairs$j])          # difference in unmapped proportion
-  pairs$a <- S$id[pairs$i]; pairs$b <- S$id[pairs$j]                       # the two samples of a pair (for the dyadic standard errors)
-  pairs[, c("group", "bray", "jaccard", "geo_km", "d_depth", "d_unm", "a", "b")]
-}
-
-# Map: for one replicate, the mean Bray-Curtis dissimilarity of the alpine samples of every region to the alpine samples of OTHER regions,
-# raw and after removing the alpine distance decay (residual from one line over all between-region pairs)
-map_rep <- function(S0, r) {
-  set.seed(7000 + r)
-  S <- S0 %>% filter(id %in% colnames(X_all)); X <- X_all[, S$id, drop = FALSE]; tot <- Matrix::colSums(X)
-  S <- S[tot >= CFG$rare_depth, ]; X <- X[, tot >= CFG$rare_depth, drop = FALSE]; tot <- tot[tot >= CFG$rare_depth]
-  D <- as.matrix(vegan::vegdist(t(as.matrix(X %*% Matrix::Diagonal(x = 1 / tot))), method = "bray"))
-  G <- geosphere::distm(cbind(S$lon, S$lat), fun = geosphere::distHaversine) / 1000
-  other <- outer(S$region, S$region, "!=")
-  fit <- lm(D[other] ~ log10(pmax(G[other], 0.1)))
-  Rm <- matrix(NA_real_, nrow(D), ncol(D)); Rm[other] <- resid(fit)
-  regs <- names(which(table(S$region) >= CFG$min_region_n))
-  bind_rows(lapply(regs, function(g) { i <- which(S$region == g); j <- which(S$region != g)
-    data.frame(replicate = r, region = g, n_samples = length(i), raw = mean(D[i, j]), residual = mean(Rm[i, j]), mean_km = mean(G[i, j])) }))
+  pairs$a <- S$id[pairs$i]; pairs$b <- S$id[pairs$j]                       # the two samples of a pair
+  pairs$ca <- S$cl[pairs$i]; pairs$cb <- S$cl[pairs$j]                     # and their clusters (the independent units of the standard errors)
+  pairs[, c("group", "bray", "jaccard", "geo_km", "d_depth", "d_unm", "a", "b", "ca", "cb")]
 }
 
 # All replicates of all analyses. Saved (pairs_all.rds) and reused on a rerun if the settings and the drawn samples are the same, so a
@@ -472,7 +434,7 @@ map_rep <- function(S0, r) {
 pairs_key <- list(dist_breaks = CFG$dist_breaks_km, n_rep = CFG$n_rep, n_per_group = CFG$n_per_group, n_pairs = CFG$n_pairs,
                   rare_depth = CFG$rare_depth, n_ids = length(all_ids), ids_chars = sum(nchar(all_ids)), thin_m = CFG$thin_m,
                   even_cell_deg = CFG$even_cell_deg, lat_breaks = CFG$lat_breaks, min_zone_clusters = CFG$min_zone_clusters,
-                  region_km = CFG$region_km, min_region_n = CFG$min_region_n, analyses = names(analyses), test = TEST_MODE, design = "decay-v3")
+                  analyses = names(analyses), test = TEST_MODE, design = "decay-v4")
 pairs_file <- file.path(out_folder, "pairs_all.rds")
 PP <- NULL
 if (REUSE_FITS && file.exists(pairs_file)) {
@@ -480,7 +442,7 @@ if (REUSE_FITS && file.exists(pairs_file)) {
   if (identical(cached$key, pairs_key)) { PP <- cached$data; message("Reusing saved pairs: ", pairs_file) }
 }
 if (is.null(PP)) {
-  PP <- list(pairs = list(), map = NULL)
+  PP <- list(pairs = list())
   for (an in names(analyses)) {
     pr <- list()
     for (r in seq_len(CFG$n_rep)) {
@@ -491,21 +453,19 @@ if (is.null(PP)) {
     }
     PP$pairs[[an]] <- bind_rows(pr)
   }
-  message("Map: dissimilarities among all alpine clusters (", CFG$n_rep, " replicates)")
-  PP$map <- bind_rows(lapply(seq_len(CFG$n_rep), function(r) map_rep(map_sets[[r]], r)))
   saveRDS(list(key = pairs_key, data = PP), pairs_file)
 }
 
-## ---- 4. One analysis: models and tests ------------------------------------------------------------------------------------------
-# dissimilarity ~ group * (log10 distance - log10 reference distance) + depth + unmapped differences: an ordinary linear model with
-# interactions, one per replicate and metric (see the header). Predictions at median depth / unmapped differences, the same for all groups.
+## ---- 4. One analysis: the pooled regression and its tests ------------------------------------------------------------------------
+# dissimilarity ~ group * (log10 distance - log10 reference distance) + depth + unmapped differences: ONE ordinary linear regression per
+# metric on the pairs of all replicates, with standard errors clustered by cluster (see the header). Predictions at median depth / unmapped
+# differences, the same for all groups.
 cmp_all <- list(c("Alpine", "Lowland"), c("Perialpine", "Lowland"), c("Alpine", "Perialpine"))      # first minus second
 short <- c(Alpine = "A", Perialpine = "P", Lowland = "L")
 stars <- function(p) ifelse(is.na(p), "", ifelse(p < 0.001, "***", ifelse(p < 0.01, "**", ifelse(p < 0.05, "*", " ns"))))
 fmt <- function(x) sprintf("%+.3f", x)
 analyse <- function(P, groups_a, label) {
   P <- as.data.frame(P); P$group <- factor(P$group, levels = groups_a); P$log10_geo <- log10(pmax(P$geo_km, 0.1))
-  reps <- sort(unique(P$rep_id))
   rng <- P %>% group_by(group) %>% summarise(min_km = min(geo_km), q05_km = quantile(geo_km, CFG$common_q[1]), median_km = median(geo_km),
                                              q95_km = quantile(geo_km, CFG$common_q[2]), max_km = max(geo_km), n_pairs = n(), .groups = "drop") %>% as.data.frame()
   common <- c(max(rng$q05_km), min(rng$q95_km))
@@ -514,30 +474,31 @@ analyse <- function(P, groups_a, label) {
   ref_main <- if (length(refs)) refs[which.min(abs(log10(refs) - 3))] else NA_real_              # the reference distance: the one nearest to 1,000 km inside the common range
   message(sprintf("%s: distance range common to all groups (%g-%g percentile): %s to %s km; reference distance: %s km", label, 100 * CFG$common_q[1], 100 * CFG$common_q[2],
                   fmt_km(common[1]), fmt_km(common[2]), if (is.finite(ref_main)) fmt_km(ref_main) else "none (the median distance)"))
+  if (any(table(P$group) < 50)) { message("  ", label, ": fewer than 50 pairs in a group: not analysed"); return(NULL) }
   med_depth <- median(P$d_depth); med_unm <- median(P$d_unm)
   c0 <- if (is.finite(ref_main)) log10(ref_main) else median(P$log10_geo)                      # distance is centred at the reference distance
   fml <- function(metric) as.formula(sprintf("%s ~ group * %s + d_depth + d_unm", metric, if (CFG$df_dist > 1) sprintf("ns(log10_geo, df = %d)", CFG$df_dist) else sprintf("I(log10_geo - %s)", format(c0, digits = 10))))
   nd_at <- function(m, g, x) data.frame(group = factor(g, levels = levels(m$model$group)), log10_geo = x, d_depth = med_depth, d_unm = med_unm)
-  pred_at <- function(m, g, x) as.numeric(predict(m, nd_at(m, g, x)))                        # predictions, vectorised (curves, adjusted values)
+  pred_at <- function(m, g, x) as.numeric(predict(m, nd_at(m, g, x)))                        # predictions, vectorised (lines, adjusted values)
   grid_g <- bind_rows(lapply(groups_a, function(g) { x <- P$log10_geo[P$group == g]; data.frame(group = g, x = seq(quantile(x, 0.01), quantile(x, 0.99), length.out = 80)) }))
-  curves <- list(); adj <- list(); checks <- list(); bl <- list(); vl <- list(); vn <- list()
-  for (metric in names(metrics)) for (r in reps) {
-    Pr <- P[P$rep_id == r, ]; Pr$group <- droplevels(Pr$group)
-    if (nlevels(Pr$group) < length(groups_a) || any(table(Pr$group) < 50)) next
-    m <- tryCatch(lm(fml(metric), data = Pr), error = function(e) NULL); if (is.null(m)) next
-    V <- dyadic_vcov(model.matrix(m), resid(m), Pr$a, Pr$b); if (is.null(V)) next
-    key <- paste(metric, r)
-    bl[[metric]][[length(bl[[metric]]) + 1]] <- coef(m); vl[[metric]][[length(vl[[metric]]) + 1]] <- V; vn[[metric]][[length(vn[[metric]]) + 1]] <- vcov(m)
-    curves[[key]] <- data.frame(replicate = r, metric = metric, group = grid_g$group, x = grid_g$x, fit = clip01(pred_at(m, grid_g$group, grid_g$x)))
-    # observed dissimilarity of every pair adjusted to the median depth / unmapped differences: residual + the group's curve at the pair's
-    # distance; binned, these are the open circles that the curve has to run through
-    adj[[key]] <- data.frame(metric = metric, group = as.character(Pr$group), x = Pr$log10_geo, y = Pr[[metric]] - fitted(m) + pred_at(m, as.character(Pr$group), Pr$log10_geo))
-    fv <- tapply(fitted(m), Pr$group, mean); ob <- tapply(Pr[[metric]], Pr$group, mean)
-    checks[[key]] <- data.frame(analysis = label, replicate = r, metric = metric, group = names(ob), observed_mean = as.numeric(ob), fitted_mean = as.numeric(fv[names(ob)]), n_pairs = as.numeric(table(Pr$group)[names(ob)]))
+  curves <- list(); adj <- list(); checks <- list(); fits <- list()
+  for (metric in names(metrics)) {
+    m <- tryCatch(lm(fml(metric), data = P), error = function(e) NULL); if (is.null(m)) next
+    V <- dyadic_vcov(model.matrix(m), resid(m), P$ca, P$cb); if (is.null(V)) next
+    fits[[metric]] <- list(m = m, V = V)
+    Xg <- design_at(m, nd_at(m, grid_g$group, grid_g$x)); f <- drop(Xg %*% coef(m)); se <- sqrt(rowSums((Xg %*% V) * Xg))
+    curves[[metric]] <- data.frame(metric = metric, group = grid_g$group, x = grid_g$x, fit = clip01(f), lo = clip01(f - 1.96 * se), hi = clip01(f + 1.96 * se))
+    # observed dissimilarity of every pair adjusted to the median depth / unmapped differences: residual + the group's line at the pair's
+    # distance; binned, these are the open circles that the line has to run through
+    adj[[metric]] <- data.frame(metric = metric, group = as.character(P$group), x = P$log10_geo, y = P[[metric]] - fitted(m) + pred_at(m, as.character(P$group), P$log10_geo))
+    fv <- tapply(fitted(m), P$group, mean); ob <- tapply(P[[metric]], P$group, mean)
+    checks[[metric]] <- data.frame(analysis = label, metric = metric, group = names(ob), observed_mean = as.numeric(ob), fitted_mean = as.numeric(fv[names(ob)]), n_pairs = as.numeric(table(P$group)[names(ob)]))
   }
-  if (!length(curves)) { message("  ", label, ": no model could be fitted (needs at least 50 pairs per group in a replicate: the smallest group has ", min(table(P$group)) / length(reps), " pairs per replicate on average; raise min_zone_clusters or n_pairs)"); return(NULL) }
-  # the coefficients of the interaction model, pooled over the replicates, and the differences between groups (only for the straight-line model:
-  # the coefficients of a spline are not interpretable one by one)
+  if (!length(fits)) { message("  ", label, ": no model could be fitted"); return(NULL) }
+  G <- attr(fits[[1]]$V, "G"); dfree <- max(G - 1, 1)
+  message(sprintf("  %s: %s pairs from %s clusters (the independent units of the tests)", label, format(nrow(P), big.mark = ","), format(G, big.mark = ",")))
+  # the coefficients of the interaction model and the differences between groups (only for the straight-line model: the coefficients of a spline are
+  # not interpretable one by one)
   coefs <- NULL; tests <- NULL
   if (CFG$df_dist == 1) {
     ref_g <- levels(P$group)[1]; c0_km <- 10^c0
@@ -548,26 +509,21 @@ analyse <- function(P, groups_a, label) {
           ifelse(is_g & is_i, sprintf("%s minus %s: difference in the rise per 10-fold distance (interaction)", g, ref_g),
             ifelse(grepl("^I\\(", nm), sprintf("%s: rise per 10-fold distance", ref_g), nm))))
     }
-    coefs <- bind_rows(lapply(names(bl), function(mt) {
-      B <- do.call(rbind, bl[[mt]]); SE <- do.call(rbind, lapply(vl[[mt]], function(V) sqrt(diag(V)))); SEn <- do.call(rbind, lapply(vn[[mt]], function(V) sqrt(diag(V))))
-      bind_rows(lapply(colnames(B), function(nm) cbind(analysis = label, metric = mt, term = nm, label = lab(nm), pool_replicates(B[, nm], SE[, nm]),
-                                                       p_naive_lm_NOT_VALID = pool_replicates(B[, nm], SEn[, nm])$p)))
-    }))
+    tfun <- function(est, se) { t <- est / se; data.frame(estimate = est, se = se, lo = est - qt(0.975, dfree) * se, hi = est + qt(0.975, dfree) * se, p = 2 * pt(-abs(t), dfree)) }
+    coefs <- bind_rows(lapply(names(fits), function(mt) { m <- fits[[mt]]$m; V <- fits[[mt]]$V; b <- coef(m)
+      cbind(analysis = label, metric = mt, term = names(b), label = lab(names(b)), tfun(unname(b), sqrt(diag(V))), p_naive_lm_NOT_VALID = unname(summary(m)$coefficients[names(b), 4]), row.names = NULL) }))
     # differences between two groups = differences of their coefficients (the reference group has none): level at the reference distance, and rise
     term_of <- function(nm, g, qt) if (qt == "level") nm[nm == paste0("group", g)] else nm[startsWith(nm, paste0("group", g, ":"))]
     cvec <- function(nm, g1, g2, qt) { v <- setNames(numeric(length(nm)), nm); for (t in term_of(nm, g1, qt)) v[t] <- v[t] + 1; for (t in term_of(nm, g2, qt)) v[t] <- v[t] - 1; v }
     cmp <- Filter(function(cp) all(cp %in% groups_a), cmp_all)
-    tests <- bind_rows(lapply(names(bl), function(mt) bind_rows(lapply(cmp, function(cp) bind_rows(lapply(c("level", "slope"), function(qt) {
-      v <- cvec(names(bl[[mt]][[1]]), cp[1], cp[2], qt)
-      est <- vapply(bl[[mt]], function(b) sum(v * b), 1); se <- vapply(vl[[mt]], function(V) sqrt(drop(t(v) %*% V %*% v)), 1)
-      cbind(analysis = label, metric = mt, quantity = qt, ref_km = if (qt == "level") c0_km else NA_real_, g1 = cp[1], g2 = cp[2], pool_replicates(est, se))
+    tests <- bind_rows(lapply(names(fits), function(mt) bind_rows(lapply(cmp, function(cp) bind_rows(lapply(c("level", "slope"), function(qt) {
+      m <- fits[[mt]]$m; V <- fits[[mt]]$V; v <- cvec(names(coef(m)), cp[1], cp[2], qt)
+      cbind(analysis = label, metric = mt, quantity = qt, ref_km = if (qt == "level") c0_km else NA_real_, g1 = cp[1], g2 = cp[2], tfun(sum(v * coef(m)), sqrt(drop(t(v) %*% V %*% v))))
     }))))))
   } else message("  tests need df_dist = 1 (a straight line per group)")
-  curves <- bind_rows(curves)
-  curves_sum <- curves %>% group_by(metric, group, x) %>% summarise(lo = qlo(fit), hi = qhi(fit), fit = median(fit), .groups = "drop") %>% as.data.frame()
-  checks <- bind_rows(checks); checks$difference <- checks$fitted_mean - checks$observed_mean
+  curves_sum <- bind_rows(curves); checks <- bind_rows(checks); checks$difference <- checks$fitted_mean - checks$observed_mean
   list(label = label, groups = groups_a, P = P, curves_sum = curves_sum, adj = bind_rows(adj), tests = tests, coefs = coefs, common = common, ref_main = ref_main,
-       rng = cbind(analysis = label, rng), checks = checks)
+       n_clusters = G, rng = cbind(analysis = label, rng), checks = checks)
 }
 res <- list()
 for (an in names(analyses)) {
@@ -577,16 +533,14 @@ for (an in names(analyses)) {
   print(table(group = P_an$group))
   res[[an]] <- analyse(P_an, analyses[[an]]$groups, an)
 }
+res <- res[!vapply(res, is.null, TRUE)]
 if (is.null(res$all)) stop("the main analysis could not be fitted")
 main <- res$all
-res <- res[!vapply(res, is.null, TRUE)]
 
 # ---- tables
 coefs_all <- bind_rows(lapply(res, `[[`, "coefs")); tests_all <- bind_rows(lapply(res, `[[`, "tests"))
-if (nrow(coefs_all)) write.csv(coefs_all[, c("analysis", "metric", "term", "label", "estimate", "se", "lo", "hi", "p", "p_naive_lm_NOT_VALID", "range_lo", "range_hi", "share_replicates_p_below_0.05", "n_replicates")],
-                               out_t("model_coefficients.csv"), row.names = FALSE)
-if (nrow(tests_all)) write.csv(tests_all[, c("analysis", "metric", "quantity", "ref_km", "g1", "g2", "estimate", "se", "lo", "hi", "p", "range_lo", "range_hi", "share_replicates_p_below_0.05", "n_replicates")],
-                               out_t("tests.csv"), row.names = FALSE)
+if (nrow(coefs_all)) write.csv(coefs_all[, c("analysis", "metric", "term", "label", "estimate", "se", "lo", "hi", "p", "p_naive_lm_NOT_VALID")], out_t("model_coefficients.csv"), row.names = FALSE)
+if (nrow(tests_all)) write.csv(tests_all[, c("analysis", "metric", "quantity", "ref_km", "g1", "g2", "estimate", "se", "lo", "hi", "p")], out_t("tests.csv"), row.names = FALSE)
 write.csv(bind_rows(lapply(names(res), function(an) cbind(analysis = an, res[[an]]$curves_sum) %>% mutate(distance_km = 10^x))), out_t("curves.csv"), row.names = FALSE)
 write.csv(bind_rows(lapply(res, `[[`, "rng")), out_t("distance_range_per_group.csv"), row.names = FALSE)
 checks_all <- bind_rows(lapply(res, `[[`, "checks")); write.csv(checks_all, out_t("model_checks.csv"), row.names = FALSE)
@@ -600,42 +554,46 @@ message(sprintf("Model check: the fitted mean dissimilarity differs from the obs
 # ---- what the models say (main analysis)
 pfmt <- function(p) format.pval(p, digits = 2, eps = 1e-16)
 if (nrow(coefs_all)) for (mt in names(metrics)) {
-  message(sprintf("\nCoefficients of the interaction model, all samples, %s (pooled over the replicates; estimate [95%% CI], p with pair-robust standard errors | naive lm p, NOT valid):", metrics_ascii[[mt]]))
+  message(sprintf("\nCoefficients of the interaction model, all samples, %s (estimate [95%% CI], p with cluster-robust standard errors | naive lm p, NOT valid):", metrics_ascii[[mt]]))
   d <- coefs_all[coefs_all$analysis == "all" & coefs_all$metric == mt, ]
   for (i in seq_len(nrow(d))) message(sprintf("  %-92s %s [%s, %s], p %s | %s", d$label[i], fmt(d$estimate[i]), fmt(d$lo[i]), fmt(d$hi[i]), pfmt(d$p[i]), pfmt(d$p_naive_lm_NOT_VALID[i])))
 }
-message("\nDo mountains look like islands of diversity? > 0 for alpine minus lowland = alpine samples MORE dissimilar at the same distance (level) / dissimilarity rising faster with distance (rise).")
+if (nrow(tests_all)) {
+  d <- tests_all[tests_all$analysis == "all" & tests_all$metric == "bray", ]
+  message("\nDifferences between groups, Bray-Curtis, all samples (alpine minus peri-alpine is not a coefficient of the model):")
+  for (i in seq_len(nrow(d))) message(sprintf("  %s | %s minus %s: %s [%s, %s], p %s", if (d$quantity[i] == "level") sprintf("level at %s km", fmt_km(d$ref_km[i])) else "rise per 10-fold distance", d$g1[i], d$g2[i], fmt(d$estimate[i]), fmt(d$lo[i]), fmt(d$hi[i]), pfmt(d$p[i])))
+}
+message("(> 0 for alpine minus lowland = alpine samples MORE dissimilar at the same distance (level) / dissimilarity rising faster with distance (rise))")
 
-## ---- 5. Map summary ----------------------------------------------------------------------------------------------------------
-cent <- cl_tab %>% group_by(region) %>% summarise(lon = mean(lon), lat = mean(lat), n_clusters = n(), elev_km = mean(elev_m, na.rm = TRUE) / 1000, .groups = "drop") %>% as.data.frame()
-cent$elev_km[is.nan(cent$elev_km)] <- NA_real_
-map_sum <- PP$map %>% group_by(region) %>% summarise(raw = median(raw), residual_lo = qlo(residual), residual_hi = qhi(residual), residual = median(residual),
-                                                      mean_km = median(mean_km), n_samples = median(n_samples), n_replicates = n(), .groups = "drop") %>%
-  left_join(cent, by = "region") %>% as.data.frame()
-write.csv(map_sum, out_t("map_regions.csv"), row.names = FALSE)
-message(sprintf("Map: %d alpine regions (at least %d alpine samples; clusters closer than %g km grouped); distinctiveness (distance-adjusted residual) from %+.3f to %+.3f",
-                nrow(map_sum), CFG$min_region_n, CFG$region_km, min(map_sum$residual), max(map_sum$residual)))
-
-# inset: do the distinct regions tend to be the high ones? distinctiveness against mean elevation, both after removing what latitude explains
-# (an ordinary regression on the regions; the partial plot of the elevation term)
-inset <- NULL; inset_fit <- NULL
-dd <- map_sum[is.finite(map_sum$elev_km) & is.finite(map_sum$residual) & is.finite(map_sum$lat), ]
-if (nrow(dd) >= 6) {
-  fit <- lm(residual ~ elev_km + lat, data = dd); sm <- summary(fit)$coefficients["elev_km", ]; ci <- confint(fit)["elev_km", ]
-  dd$ex <- resid(lm(elev_km ~ lat, data = dd)); dd$ey <- resid(lm(residual ~ lat, data = dd))
-  inset_fit <- data.frame(n_regions = nrow(dd), slope_per_km = sm["Estimate"], lo = ci[1], hi = ci[2], p = sm["Pr(>|t|)"], row.names = NULL)
-  write.csv(inset_fit, out_t("map_elevation_regression.csv"), row.names = FALSE)
-  message(sprintf("Inset: distinctiveness against elevation given latitude, %d regions: %+.4f per km [%+.4f, %+.4f], p = %.2g", nrow(dd), sm["Estimate"], ci[1], ci[2], sm["Pr(>|t|)"]))
-  inset <- ggplot(dd, aes(ex, ey)) +
-    geom_hline(yintercept = 0, colour = "grey75", linewidth = 0.3) + geom_vline(xintercept = 0, colour = "grey75", linewidth = 0.3) +
-    geom_smooth(method = "lm", formula = y ~ x, colour = "grey25", fill = "grey70", alpha = 0.3, linewidth = 0.6) +
-    geom_point(aes(size = n_clusters), colour = "#2B6CB0", alpha = 0.85) + scale_size_continuous(range = c(1.2, 3.8), guide = "none") +
-    annotate("text", x = -Inf, y = Inf, hjust = -0.05, vjust = 1.3, size = 2.5, lineheight = 1.05,
-             label = sprintf("%+.3f per km [%+.3f, %+.3f]\np = %.2g (%d regions)", sm["Estimate"], ci[1], ci[2], sm["Pr(>|t|)"], nrow(dd))) +
-    scale_y_continuous(expand = expansion(mult = c(0.05, 0.3))) +
-    labs(x = "Elevation of the region (km), given latitude", y = "Distinctiveness, given latitude") +
-    theme_bw(base_size = 8) + theme(panel.grid.minor = element_blank(), plot.background = element_rect(fill = "white", colour = "grey40"), plot.margin = margin(4, 6, 2, 2))
-} else message("Inset not drawn: fewer than 6 regions with an elevation")
+## ---- 5. NMDS ---------------------------------------------------------------------------------------------------------------------------
+# Non-metric multidimensional scaling of the Bray-Curtis dissimilarities of the alpine samples and the evenly spaced lowland samples. The
+# distances are computed on the nmds_top_otus most abundant OTUs (relative abundances as in the full community; the cost is samples^2 x OTUs).
+nmds_file <- file.path(out_folder, "nmds_result.rds")
+nmds_key <- list(n = nrow(alp_nmds) + nrow(low_nmds), chars = sum(nchar(c(alp_nmds$id, low_nmds$id))), top = CFG$nmds_top_otus, rare = CFG$rare_depth, test = TEST_MODE)
+nm <- NULL; stress <- NA_real_
+if (REUSE_FITS && file.exists(nmds_file)) { nmds_cached <- readRDS(nmds_file); if (identical(nmds_cached$key, nmds_key)) { nm <- nmds_cached$nm; stress <- nmds_cached$stress; message("Reusing the saved NMDS: ", nmds_file) } }
+if (is.null(nm)) {
+  S <- bind_rows(alp_nmds, low_nmds) %>% filter(id %in% colnames(X_all))
+  X <- X_all[, S$id, drop = FALSE]; tot <- Matrix::colSums(X); ok <- tot >= CFG$rare_depth
+  S <- S[ok, ]; X <- X[, ok, drop = FALSE]; tot <- tot[ok]
+  Prel <- X %*% Matrix::Diagonal(x = 1 / tot)
+  rs <- Matrix::rowSums(Prel); top <- order(rs, decreasing = TRUE)[seq_len(min(CFG$nmds_top_otus, nrow(Prel)))]
+  M <- as.matrix(Matrix::t(Prel[top, , drop = FALSE]))                                   # samples x the most abundant OTUs
+  message(sprintf("NMDS: %d samples (%d alpine, %d lowland) x %d OTUs (%.1f%% of all reads); Bray-Curtis distances: about %.0f min, then the ordination",
+                  nrow(M), sum(S$group == "Alpine"), sum(S$group == "Lowland"), ncol(M), 100 * sum(rs[top]) / sum(rs), 4.2e-9 * nrow(M)^2 * ncol(M) / 60))
+  D <- vegan::vegdist(M, method = "bray")
+  init <- stats::prcomp(sqrt(M), rank. = 2)$x[, 1:2]                                     # a PCA of the Hellinger-transformed data as the starting configuration
+  mds <- vegan::monoMDS(D, y = init, k = 2, maxit = 300)
+  sc <- vegan::scores(mds); stress <- mds$stress
+  nm <- data.frame(id = S$id, group = as.character(S$group), continent = S$continent, lon = S$lon, lat = S$lat, NMDS1 = sc[, 1], NMDS2 = sc[, 2])
+  saveRDS(list(key = nmds_key, nm = nm, stress = stress), nmds_file)
+}
+message(sprintf("NMDS stress %.3f (< 0.2 is usable for a 2D picture, < 0.1 good)", stress))
+nm$cat <- ifelse(nm$group == "Lowland", "Lowland", paste0("Alpine: ", nm$continent))
+cat_levels <- c("Lowland", paste0("Alpine: ", intersect(names(CFG$cols_continent), nm$continent[nm$group == "Alpine"])), if (any(nm$continent == "Other")) "Alpine: Other")
+nm$cat <- factor(nm$cat, levels = cat_levels)
+write.csv(nm, out_t("nmds_samples.csv"), row.names = FALSE)
+write.csv(data.frame(category = cat_levels, samples = as.integer(table(nm$cat)[cat_levels]), stress = stress), out_t("nmds_summary.csv"), row.names = FALSE)
 
 ## ---- 6. Figures -----------------------------------------------------------------------------------------------------------------
 x_scale <- scale_x_continuous(breaks = log10(c(1, 10, 100, 1000, 10000)), labels = c("1", "10", "100", "1,000", "10,000"))
@@ -671,36 +629,33 @@ decay_panel <- function(rs, metric, tag, title = NULL, show_x = TRUE) {
 }
 pA <- decay_panel(main, "bray", "A"); pB <- decay_panel(main, "jaccard", "B")
 
-# map: alpine regions coloured by their distinctiveness from the other alpine regions (distance-adjusted), the elevation inset in an empty corner
-world <- map_data("world")
-d_map <- map_sum[order(abs(map_sum$residual)), ]; lim <- max(abs(d_map$residual), na.rm = TRUE)
-pC <- ggplot() +
-  geom_polygon(data = world, aes(long, lat, group = group), fill = "grey93", colour = "grey78", linewidth = 0.15) +
-  geom_point(data = d_map, aes(lon, lat, colour = residual, size = n_clusters), alpha = 0.9) +
-  scale_colour_gradient2(low = "#2166AC", mid = "grey92", high = "#B2182B", midpoint = 0, limits = c(-lim, lim),
-                         name = "Distinctiveness of a region's alpine community (dissimilarity to the other alpine regions minus the expectation from distance)") +
-  scale_size_continuous(range = c(2.5, 8), name = "Alpine clusters in the region") +
-  guides(colour = guide_colourbar(title.position = "top", barwidth = unit(3.6, "in"), barheight = unit(0.13, "in")), size = guide_legend(title.position = "top", nrow = 1)) +
-  coord_quickmap(xlim = c(-180, 180), ylim = c(-58, 78), expand = FALSE) +
-  labs(tag = "C", x = NULL, y = NULL) + theme_fig +
-  theme(legend.position = "top", legend.box = "horizontal", legend.title = element_text(size = 8), legend.text = element_text(size = 8),
-        panel.grid = element_blank(), panel.background = element_rect(fill = "white"))
-if (!is.null(inset)) pC <- pC + annotation_custom(ggplotGrob(inset), xmin = -178, xmax = -88, ymin = -57, ymax = -3)
+# NMDS: lowland first (at the bottom), alpine by continent on top, 95% ellipses of the categories with at least 10 samples
+cols_cat <- c(Lowland = unname(CFG$cols["Lowland"]), setNames(unname(CFG$cols_continent[sub("^Alpine: ", "", cat_levels[-1])]), cat_levels[-1]))
+cols_cat[is.na(cols_cat)] <- "grey40"
+nm <- nm[order(nm$cat), ]
+ell_cats <- names(which(table(nm$cat) >= 10))
+pC <- ggplot(nm, aes(NMDS1, NMDS2, colour = cat)) +
+  geom_point(size = 0.4, alpha = 0.3, shape = 16) +
+  stat_ellipse(data = nm[nm$cat %in% ell_cats, ], aes(group = cat), level = 0.95, type = "norm", linewidth = 0.9) +
+  annotate("text", x = Inf, y = -Inf, hjust = 1.05, vjust = -0.6, size = 3, label = sprintf("stress = %.2f", stress)) +
+  scale_colour_manual(values = cols_cat, name = NULL) +
+  guides(colour = guide_legend(nrow = 1, override.aes = list(size = 3.5, alpha = 1, linewidth = 1))) +
+  coord_equal() + labs(tag = "C", x = "NMDS 1", y = "NMDS 2") + theme_fig +
+  theme(legend.position = "top", legend.text = element_text(size = 9))
 
-stat_txt <- paste("Statistics: a linear model with a group x distance interaction (distance centred at the reference distance) per replicate; the stars are the tests of its terms (level at the reference distance and rise per 10-fold distance of A = alpine, P = peri-alpine, L = lowland; A-L = alpine minus lowland), with standard errors that are cluster-robust for pair data (pairs sharing a sample are dependent; Aronow et al. 2015), pooled over the replicates; *** p < 0.001, ** p < 0.01, * p < 0.05, ns; not adjusted for multiple tests. All coefficients: tables/model_coefficients.csv.")
+stat_txt <- paste("Statistics: one linear regression per metric on the pairs of all replicates with a group x distance interaction (distance centred at the reference distance); the stars are the tests of its terms (level at the reference distance and rise per 10-fold distance of A = alpine, P = peri-alpine, L = lowland; A-L = alpine minus lowland), with standard errors that are cluster-robust for pair data (pairs sharing a cluster are dependent; Aronow et al. 2015; the clusters are the independent units); *** p < 0.001, ** p < 0.01, * p < 0.05, ns; not adjusted for multiple tests. All coefficients: tables/model_coefficients.csv.")
 caption <- paste(
-  "Distance decay of community dissimilarity in alpine, peri-alpine (lowland within 20 km of an alpine area) and lowland soils.",
-  sprintf("A, B: Bray-Curtis and Jaccard dissimilarity between pairs of samples of the same group against geographic distance (one straight line per group, linear models%s). Lines = median over %d replicates, ribbons = range between replicates (2.5-97.5%%), open circles = observed dissimilarity adjusted to the median differences in sequencing depth and unmapped proportion (mean in 8 bins of distance).",
-          if (CFG$df_dist > 1) sprintf("; natural spline with %d df", CFG$df_dist) else "", length(unique(PP$map$replicate))),
-  sprintf("Each replicate: %d samples per group (one random sample per BioProject / location cluster, at least %g m apart, cut down evenly over %g-degree latitude / longitude cells) and up to %d pairs per group (random within classes of geographic distance).", n_main, CFG$thin_m, CFG$even_cell_deg, CFG$n_pairs),
+  "Distance decay of community dissimilarity in alpine, peri-alpine (lowland within 20 km of an alpine area) and lowland soils, and the ordination of alpine and lowland soils.",
+  sprintf("A, B: Bray-Curtis and Jaccard dissimilarity between pairs of samples of the same group against geographic distance (one straight line per group%s). Lines = regression, ribbons = 95%% interval, open circles = observed dissimilarity adjusted to the median differences in sequencing depth and unmapped proportion (mean in 8 bins of distance).",
+          if (CFG$df_dist > 1) sprintf("; natural spline with %d df", CFG$df_dist) else ""),
+  sprintf("Each of %d replicates: %d samples per group (one random sample per BioProject / location cluster, at least %g m apart, cut down evenly over %g-degree latitude / longitude cells) and up to %d pairs per group (random within classes of geographic distance); the pairs of all replicates are analysed together.", CFG$n_rep, n_main, CFG$thin_m, CFG$even_cell_deg, CFG$n_pairs),
   stat_txt,
-  sprintf("C: alpine regions (clusters closer than %g km grouped; at least %d alpine samples; point size = number of alpine clusters), coloured by how distinct their alpine community is from those of the other alpine regions: the mean Bray-Curtis dissimilarity to the alpine samples of all other regions minus what one alpine distance decay predicts for those distances (red = more distinct than distance explains; median over replicates, one random alpine sample per cluster).",
-          CFG$region_km, CFG$min_region_n),
-  if (!is.null(inset_fit)) sprintf("Inset: distinctiveness against the mean elevation of the region, both after removing what latitude explains (ordinary regression on %d regions: %+.3f per km, p = %.2g).", inset_fit$n_regions, inset_fit$slope_per_km, inset_fit$p))
-assemble_fig(file.path(out_folder, "fig3_distance_decay.png"), list(list(pA, pB), list(pC)), get_legend(pA), caption, width = 14, height = 13.5, row_heights = c(1, 1.1))
-saveRDS(list(A = pA, B = pB, C = pC, inset = inset), file.path(out_folder, "fig3_panels.rds"))
+  sprintf("C: NMDS of the Bray-Curtis dissimilarities (on the %d most abundant OTUs) of %s alpine samples, coloured by continent, and %s lowland samples spread evenly over latitude / longitude; ellipses = 95%% of the samples of a category.",
+          CFG$nmds_top_otus, format(sum(nm$group == "Alpine"), big.mark = ","), format(sum(nm$group == "Lowland"), big.mark = ",")))
+assemble_fig(file.path(out_folder, "fig3_distance_decay.png"), list(list(pA, pB), list(pC)), get_legend(pA), caption, width = 14, height = 15, row_heights = c(1, 1.25))
+saveRDS(list(A = pA, B = pB, C = pC), file.path(out_folder, "fig3_panels.rds"))
 
-# Supplementary: the same analysis within latitude zones
+# Supplementary: the same analysis within the two hemispheres
 zone_res <- res[names(res) != "all"]
 if (length(zone_res)) {
   zpanels <- lapply(c("bray", "jaccard"), function(mt) lapply(seq_along(CFG$zone_names), function(z) {
@@ -712,7 +667,7 @@ if (length(zone_res)) {
   leg_src <- zone_res[[which.max(vapply(zone_res, function(x) length(x$groups), 1))]]          # the legend of the zone with the most groups
   zleg <- get_legend(decay_panel(leg_src, "bray", ""))
   zcap <- paste("Supplementary Figure 5. The distance decay of Figure 3 within the two hemispheres (columns: Southern and Northern hemisphere): Bray-Curtis (top) and Jaccard (bottom) dissimilarity between pairs of samples of the same group against geographic distance.",
-                "Every hemisphere has its own matched groups (a group needs at least", CFG$min_zone_clusters, "clusters in it; sample sizes are given above the panels), replicates, lines and tests. Lines = median over replicates, ribbons = range between replicates, open circles = observed dissimilarity adjusted to the median depth / unmapped differences.",
+                "Every hemisphere has its own matched groups (a group needs at least", CFG$min_zone_clusters, "clusters in it; sample sizes are given above the panels), regression and tests. Lines = regression, ribbons = 95% interval, open circles = observed dissimilarity adjusted to the median depth / unmapped differences.",
                 stat_txt, "A hemisphere in which the alpine group and one more group do not have enough clusters is left out ('not enough samples').")
   assemble_fig(file.path(out_folder, "figS5_latitude_zones.png"), c(zpanels[1], zpanels[2]), zleg, zcap, width = 12, height = 9.5)
 }
