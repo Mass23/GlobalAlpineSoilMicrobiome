@@ -40,18 +40,22 @@
 #   LIMITS: the tests cannot see spatial autocorrelation between DIFFERENT clusters (neighbouring regions resemble each other): judge
 #   robustness by the size of the effects.
 #
-# NMDS (panel C): non-metric multidimensional scaling of the Bray-Curtis dissimilarities of ALL alpine samples (nmds_n = Inf) and the same number
-#   of lowland samples spread evenly over latitude / longitude (at most one per thin_m metres), coloured: lowland, and alpine by continent (rule-based
-#   boxes in continent_of(): check tables/nmds_samples.csv), with 95% ellipses. Computing Bray-Curtis between ~9,000 samples over all OTUs would take
-#   hours: the distances use the nmds_top_otus most abundant OTUs (a few minutes; the log gives the expected time). The ordination starts from a PCA.
+# UMAP (panel C): a two-dimensional map of the community composition of ALL alpine samples (umap_n = Inf) and the same number of lowland
+#   samples spread evenly over latitude / longitude (at most one per thin_m metres), coloured: lowland, and alpine by continent (rule-based
+#   boxes in continent_of(): check tables/umap_samples.csv), with 95% ellipses. The relative abundances of the umap_top_otus most abundant OTUs
+#   are Hellinger-transformed (square root), reduced to umap_pcs principal components and embedded with UMAP (package uwot, Euclidean distance
+#   on the components: about a minute for ~9,000 samples). UMAP keeps the NEIGHBOURHOODS of
+#   samples, not the distances between groups: the position and size of a cluster and the gaps between clusters are not quantitative, the
+#   axes have no meaning, and the picture depends somewhat on umap_neighbors and umap_min_dist (fixed seed: reproducible). Needs the R packages
+#   uwot and RSpectra (conda: r-uwot, r-rspectra).
 #
 # SUPPLEMENTARY (figS5_latitude_zones.png): the same analysis within the two hemispheres (lat_breaks = 0: southern and northern
 #   hemisphere): every hemisphere has its own matched groups, lines and tests. A group needs min_zone_clusters clusters in it; hemispheres
 #   without enough samples are left out.
 #
 # FIGURE (in <out_folder>)  fig3_distance_decay.png : A, B = Bray-Curtis / Jaccard dissimilarity against distance per group (with the tests);
-#   C = NMDS.
-# TABLES (in <out_folder>/tables)  model_coefficients.csv, tests.csv, curves.csv, nmds_samples.csv, nmds_summary.csv, model_checks.csv,
+#   C = UMAP.
+# TABLES (in <out_folder>/tables)  model_coefficients.csv, tests.csv, curves.csv, umap_samples.csv, umap_summary.csv, model_checks.csv,
 #   samples_per_replicate.csv, pair_counts.csv, distance_range_per_group.csv, share_of_pairs_at_dissimilarity_1.csv
 #
 # Input : <data_folder>/sample_data_filtered.tsv (needs perialpine_alpine and cluster_id: rerun prepare_microbeatlas_data if absent)
@@ -102,8 +106,13 @@ CFG <- list(
   lat_breaks  = 0,              # latitude zones of the supplementary figure (degrees): below 0 and above 0 = the two hemispheres
   zone_names  = c("Southern hemisphere", "Northern hemisphere"),
   min_zone_clusters = 15,       # a group needs at least this many clusters in a zone to be analysed there
-  nmds_n      = Inf,            # NMDS: this many alpine samples (Inf = all of them) and the same number of evenly spaced lowland samples
-  nmds_top_otus = 2000,         # NMDS: Bray-Curtis on the most abundant OTUs (all OTUs would take hours for ~9,000 samples; the time grows with samples^2 x OTUs)
+  umap_n      = Inf,            # UMAP: this many alpine samples (Inf = all of them) and the same number of evenly spaced lowland samples
+  umap_top_otus = 5000,         # UMAP: the most abundant OTUs used (a dense samples x OTUs matrix: ~9,000 x 5,000 = 0.4 GB)
+  umap_pcs    = 50,             # UMAP: principal components of the Hellinger-transformed data that UMAP works on
+  umap_neighbors = 30,          # UMAP: size of the local neighbourhood (larger = more of the global structure, smaller = more detail)
+  umap_min_dist = 0.3,          # UMAP: how tightly points may be packed (0 = tight clumps, 1 = spread out)
+  umap_threads = 4,             # UMAP: threads
+  umap_seed   = 1,              # UMAP: random seed (the embedding is reproducible)
   points_max  = 40000,          # pairs drawn as points (random subset; the models use all pairs)
   point_alpha = 0.05,
   cols        = c(Lowland = "#7C9885", Perialpine = "#CC79A7", Alpine = "#2B6CB0"),
@@ -111,7 +120,7 @@ CFG <- list(
 )
 if (TEST_MODE) {
   out_folder <- paste0(out_folder, "_TEST")
-  CFG$n_per_group <- 60; CFG$n_rep <- 1; CFG$n_pairs <- 300; CFG$min_zone_clusters <- 8; CFG$nmds_n <- 150; CFG$nmds_top_otus <- 300
+  CFG$n_per_group <- 60; CFG$n_rep <- 1; CFG$n_pairs <- 300; CFG$min_zone_clusters <- 8; CFG$umap_n <- 150; CFG$umap_top_otus <- 300; CFG$umap_pcs <- 20; CFG$umap_neighbors <- 15
 }
 dir.create(file.path(out_folder, "tables"), recursive = TRUE, showWarnings = FALSE)
 out_t <- function(...) file.path(out_folder, "tables", ...)
@@ -290,9 +299,9 @@ for (an in names(analyses)) {
 n_main <- sum(analyses$all$sel[[1]]$group == analyses$all$groups[1])
 if (n_main < 100) warning("fewer than 100 samples per group: the distance decays will be poorly determined")
 
-# NMDS samples: ALL alpine samples (nmds_n = Inf) and the same number of lowland samples, spread evenly over latitude / longitude cells
-# (at most one per thin_m metres); a smaller nmds_n cuts the alpine samples down evenly as well
-# Continents by boxes of latitude / longitude, evaluated in this order (a rule of thumb: check tables/nmds_samples.csv and edit the boxes if
+# UMAP samples: ALL alpine samples (umap_n = Inf) and the same number of lowland samples, spread evenly over latitude / longitude cells
+# (at most one per thin_m metres); a smaller umap_n cuts the alpine samples down evenly as well
+# Continents by boxes of latitude / longitude, evaluated in this order (a rule of thumb: check tables/umap_samples.csv and edit the boxes if
 # an alpine sample is on the wrong continent; samples that fit nowhere are "Other")
 continent_of <- function(lat, lon) {
   out <- rep("Other", length(lat))
@@ -309,15 +318,15 @@ continent_of <- function(lat, lon) {
 }
 set.seed(9000)
 alp_pool <- meta[meta$group == "Alpine", ]; low_pool <- meta[meta$group == "Lowland", ]
-if (nrow(low_pool) > 3 * min(CFG$nmds_n, nrow(alp_pool))) low_pool <- low_pool[even_order(low_pool$lat, low_pool$lon)[seq_len(3 * min(CFG$nmds_n, nrow(alp_pool)))], ]   # thinning is slow on many samples
+if (nrow(low_pool) > 3 * min(CFG$umap_n, nrow(alp_pool))) low_pool <- low_pool[even_order(low_pool$lat, low_pool$lon)[seq_len(3 * min(CFG$umap_n, nrow(alp_pool)))], ]   # thinning is slow on many samples
 low_pool <- low_pool[thin_sites(low_pool$lat, low_pool$lon, CFG$thin_m), ]
-n_nmds <- min(CFG$nmds_n, nrow(alp_pool), nrow(low_pool))
-alp_nmds <- alp_pool[even_order(alp_pool$lat, alp_pool$lon)[seq_len(n_nmds)], ]
-low_nmds <- low_pool[even_order(low_pool$lat, low_pool$lon)[seq_len(n_nmds)], ]
-alp_nmds$continent <- continent_of(alp_nmds$lat, alp_nmds$lon); low_nmds$continent <- "Lowland"
-message(sprintf("NMDS samples: %d alpine (%s) and %d evenly spaced lowland samples", nrow(alp_nmds), paste(sprintf("%s %d", names(table(alp_nmds$continent)), table(alp_nmds$continent)), collapse = ", "), nrow(low_nmds)))
+n_umap <- min(CFG$umap_n, nrow(alp_pool), nrow(low_pool))
+alp_umap <- alp_pool[even_order(alp_pool$lat, alp_pool$lon)[seq_len(n_umap)], ]
+low_umap <- low_pool[even_order(low_pool$lat, low_pool$lon)[seq_len(n_umap)], ]
+alp_umap$continent <- continent_of(alp_umap$lat, alp_umap$lon); low_umap$continent <- "Lowland"
+message(sprintf("UMAP samples: %d alpine (%s) and %d evenly spaced lowland samples", nrow(alp_umap), paste(sprintf("%s %d", names(table(alp_umap$continent)), table(alp_umap$continent)), collapse = ", "), nrow(low_umap)))
 
-all_ids <- unique(c(unlist(lapply(analyses, function(a) unlist(lapply(a$sel, `[[`, "id")))), alp_nmds$id, low_nmds$id))
+all_ids <- unique(c(unlist(lapply(analyses, function(a) unlist(lapply(a$sel, `[[`, "id")))), alp_umap$id, low_umap$id))
 message(length(all_ids), " distinct samples across all analyses and replicates")
 
 to_sparse <- function(m) {
@@ -565,35 +574,38 @@ if (nrow(tests_all)) {
 }
 message("(> 0 for alpine minus lowland = alpine samples MORE dissimilar at the same distance (level) / dissimilarity rising faster with distance (rise))")
 
-## ---- 5. NMDS ---------------------------------------------------------------------------------------------------------------------------
-# Non-metric multidimensional scaling of the Bray-Curtis dissimilarities of the alpine samples and the evenly spaced lowland samples. The
-# distances are computed on the nmds_top_otus most abundant OTUs (relative abundances as in the full community; the cost is samples^2 x OTUs).
-nmds_file <- file.path(out_folder, "nmds_result.rds")
-nmds_key <- list(n = nrow(alp_nmds) + nrow(low_nmds), chars = sum(nchar(c(alp_nmds$id, low_nmds$id))), top = CFG$nmds_top_otus, rare = CFG$rare_depth, test = TEST_MODE)
-nm <- NULL; stress <- NA_real_
-if (REUSE_FITS && file.exists(nmds_file)) { nmds_cached <- readRDS(nmds_file); if (identical(nmds_cached$key, nmds_key)) { nm <- nmds_cached$nm; stress <- nmds_cached$stress; message("Reusing the saved NMDS: ", nmds_file) } }
+## ---- 5. UMAP ---------------------------------------------------------------------------------------------------------------------------
+# The relative abundances of the umap_top_otus most abundant OTUs (as in the full community), Hellinger-transformed (square root), centred and
+# reduced to umap_pcs principal components (a partial SVD, RSpectra), then embedded with UMAP (uwot; Euclidean distance on the components; the first
+# two components are the starting layout). No distance matrix between all samples is computed, so it takes about a minute.
+for (pkg in c("uwot", "RSpectra")) if (!requireNamespace(pkg, quietly = TRUE)) stop("the UMAP needs the R package ", pkg, " (conda: r-", tolower(pkg), "; add it to envs/r_analyses/environment.yml)")
+umap_file <- file.path(out_folder, "umap_result.rds")
+umap_key <- list(n = nrow(alp_umap) + nrow(low_umap), chars = sum(nchar(c(alp_umap$id, low_umap$id))), top = CFG$umap_top_otus, pcs = CFG$umap_pcs, nn = CFG$umap_neighbors,
+                 md = CFG$umap_min_dist, seed = CFG$umap_seed, rare = CFG$rare_depth, test = TEST_MODE)
+nm <- NULL
+if (REUSE_FITS && file.exists(umap_file)) { umap_cached <- readRDS(umap_file); if (identical(umap_cached$key, umap_key)) { nm <- umap_cached$nm; message("Reusing the saved UMAP: ", umap_file) } }
 if (is.null(nm)) {
-  S <- bind_rows(alp_nmds, low_nmds) %>% filter(id %in% colnames(X_all))
+  S <- bind_rows(alp_umap, low_umap) %>% filter(id %in% colnames(X_all))
   X <- X_all[, S$id, drop = FALSE]; tot <- Matrix::colSums(X); ok <- tot >= CFG$rare_depth
   S <- S[ok, ]; X <- X[, ok, drop = FALSE]; tot <- tot[ok]
   Prel <- X %*% Matrix::Diagonal(x = 1 / tot)
-  rs <- Matrix::rowSums(Prel); top <- order(rs, decreasing = TRUE)[seq_len(min(CFG$nmds_top_otus, nrow(Prel)))]
-  M <- as.matrix(Matrix::t(Prel[top, , drop = FALSE]))                                   # samples x the most abundant OTUs
-  message(sprintf("NMDS: %d samples (%d alpine, %d lowland) x %d OTUs (%.1f%% of all reads); Bray-Curtis distances: about %.0f min, then the ordination",
-                  nrow(M), sum(S$group == "Alpine"), sum(S$group == "Lowland"), ncol(M), 100 * sum(rs[top]) / sum(rs), 4.2e-9 * nrow(M)^2 * ncol(M) / 60))
-  D <- vegan::vegdist(M, method = "bray")
-  init <- stats::prcomp(sqrt(M), rank. = 2)$x[, 1:2]                                     # a PCA of the Hellinger-transformed data as the starting configuration
-  mds <- vegan::monoMDS(D, y = init, k = 2, maxit = 300)
-  sc <- vegan::scores(mds); stress <- mds$stress
-  nm <- data.frame(id = S$id, group = as.character(S$group), continent = S$continent, lon = S$lon, lat = S$lat, NMDS1 = sc[, 1], NMDS2 = sc[, 2])
-  saveRDS(list(key = nmds_key, nm = nm, stress = stress), nmds_file)
+  rs <- Matrix::rowSums(Prel); top <- order(rs, decreasing = TRUE)[seq_len(min(CFG$umap_top_otus, nrow(Prel)))]
+  H <- sqrt(as.matrix(Matrix::t(Prel[top, , drop = FALSE])))                              # samples x the most abundant OTUs, Hellinger-transformed
+  message(sprintf("UMAP: %d samples (%d alpine, %d lowland) x %d OTUs (%.1f%% of all reads), %d principal components",
+                  nrow(H), sum(S$group == "Alpine"), sum(S$group == "Lowland"), ncol(H), 100 * sum(rs[top]) / sum(rs), min(CFG$umap_pcs, ncol(H) - 1, nrow(H) - 1)))
+  H <- sweep(H, 2, colMeans(H))
+  kpc <- min(CFG$umap_pcs, ncol(H) - 1, nrow(H) - 1)
+  sv <- RSpectra::svds(H, k = kpc); pcs <- sv$u %*% diag(sv$d, nrow = kpc); rm(H, sv)
+  emb <- uwot::umap(pcs, n_neighbors = min(CFG$umap_neighbors, nrow(pcs) - 1), min_dist = CFG$umap_min_dist, metric = "euclidean",
+                    init = pcs[, 1:2], init_sdev = 1e-4, n_threads = CFG$umap_threads, seed = CFG$umap_seed, verbose = FALSE)
+  nm <- data.frame(id = S$id, group = as.character(S$group), continent = S$continent, lon = S$lon, lat = S$lat, UMAP1 = emb[, 1], UMAP2 = emb[, 2])
+  saveRDS(list(key = umap_key, nm = nm), umap_file)
 }
-message(sprintf("NMDS stress %.3f (< 0.2 is usable for a 2D picture, < 0.1 good)", stress))
 nm$cat <- ifelse(nm$group == "Lowland", "Lowland", paste0("Alpine: ", nm$continent))
 cat_levels <- c("Lowland", paste0("Alpine: ", intersect(names(CFG$cols_continent), nm$continent[nm$group == "Alpine"])), if (any(nm$continent == "Other")) "Alpine: Other")
 nm$cat <- factor(nm$cat, levels = cat_levels)
-write.csv(nm, out_t("nmds_samples.csv"), row.names = FALSE)
-write.csv(data.frame(category = cat_levels, samples = as.integer(table(nm$cat)[cat_levels]), stress = stress), out_t("nmds_summary.csv"), row.names = FALSE)
+write.csv(nm, out_t("umap_samples.csv"), row.names = FALSE)
+write.csv(data.frame(category = cat_levels, samples = as.integer(table(nm$cat)[cat_levels])), out_t("umap_summary.csv"), row.names = FALSE)
 
 ## ---- 6. Figures -----------------------------------------------------------------------------------------------------------------
 x_scale <- scale_x_continuous(breaks = log10(c(1, 10, 100, 1000, 10000)), labels = c("1", "10", "100", "1,000", "10,000"))
@@ -629,18 +641,17 @@ decay_panel <- function(rs, metric, tag, title = NULL, show_x = TRUE) {
 }
 pA <- decay_panel(main, "bray", "A"); pB <- decay_panel(main, "jaccard", "B")
 
-# NMDS: lowland first (at the bottom), alpine by continent on top, 95% ellipses of the categories with at least 10 samples
+# UMAP: lowland first (at the bottom), alpine by continent on top, 95% ellipses of the categories with at least 10 samples
 cols_cat <- c(Lowland = unname(CFG$cols["Lowland"]), setNames(unname(CFG$cols_continent[sub("^Alpine: ", "", cat_levels[-1])]), cat_levels[-1]))
 cols_cat[is.na(cols_cat)] <- "grey40"
 nm <- nm[order(nm$cat), ]
 ell_cats <- names(which(table(nm$cat) >= 10))
-pC <- ggplot(nm, aes(NMDS1, NMDS2, colour = cat)) +
-  geom_point(size = 0.4, alpha = 0.3, shape = 16) +
+pC <- ggplot(nm, aes(UMAP1, UMAP2, colour = cat)) +
+  geom_point(size = if (nrow(nm) < 1500) 1.1 else 0.5, alpha = min(0.7, max(0.25, 3000 / nrow(nm))), shape = 16) +      # visible with few points, not a blob with many
   stat_ellipse(data = nm[nm$cat %in% ell_cats, ], aes(group = cat), level = 0.95, type = "norm", linewidth = 0.9) +
-  annotate("text", x = Inf, y = -Inf, hjust = 1.05, vjust = -0.6, size = 3, label = sprintf("stress = %.2f", stress)) +
   scale_colour_manual(values = cols_cat, name = NULL) +
   guides(colour = guide_legend(nrow = 1, override.aes = list(size = 3.5, alpha = 1, linewidth = 1))) +
-  coord_equal() + labs(tag = "C", x = "NMDS 1", y = "NMDS 2") + theme_fig +
+  coord_equal() + labs(tag = "C", x = "UMAP 1", y = "UMAP 2") + theme_fig +
   theme(legend.position = "top", legend.text = element_text(size = 9))
 
 stat_txt <- paste("Statistics: one linear regression per metric on the pairs of all replicates with a group x distance interaction (distance centred at the reference distance); the stars are the tests of its terms (level at the reference distance and rise per 10-fold distance of A = alpine, P = peri-alpine, L = lowland; A-L = alpine minus lowland), with standard errors that are cluster-robust for pair data (pairs sharing a cluster are dependent; Aronow et al. 2015; the clusters are the independent units); *** p < 0.001, ** p < 0.01, * p < 0.05, ns; not adjusted for multiple tests. All coefficients: tables/model_coefficients.csv.")
@@ -650,8 +661,8 @@ caption <- paste(
           if (CFG$df_dist > 1) sprintf("; natural spline with %d df", CFG$df_dist) else ""),
   sprintf("Each of %d replicates: %d samples per group (one random sample per BioProject / location cluster, at least %g m apart, cut down evenly over %g-degree latitude / longitude cells) and up to %d pairs per group (random within classes of geographic distance); the pairs of all replicates are analysed together.", CFG$n_rep, n_main, CFG$thin_m, CFG$even_cell_deg, CFG$n_pairs),
   stat_txt,
-  sprintf("C: NMDS of the Bray-Curtis dissimilarities (on the %d most abundant OTUs) of %s alpine samples, coloured by continent, and %s lowland samples spread evenly over latitude / longitude; ellipses = 95%% of the samples of a category.",
-          CFG$nmds_top_otus, format(sum(nm$group == "Alpine"), big.mark = ","), format(sum(nm$group == "Lowland"), big.mark = ",")))
+  sprintf("C: UMAP of the community composition (Hellinger-transformed relative abundances of the %d most abundant OTUs, %d principal components) of %s alpine samples, coloured by continent, and %s lowland samples spread evenly over latitude / longitude; ellipses = 95%% of the samples of a category. UMAP keeps neighbourhoods, not distances: the axes, the size of the clusters and the gaps between them are not quantitative.",
+          CFG$umap_top_otus, CFG$umap_pcs, format(sum(nm$group == "Alpine"), big.mark = ","), format(sum(nm$group == "Lowland"), big.mark = ",")))
 assemble_fig(file.path(out_folder, "fig3_distance_decay.png"), list(list(pA, pB), list(pC)), get_legend(pA), caption, width = 14, height = 15, row_heights = c(1, 1.25))
 saveRDS(list(A = pA, B = pB, C = pC), file.path(out_folder, "fig3_panels.rds"))
 
