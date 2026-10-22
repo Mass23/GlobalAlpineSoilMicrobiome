@@ -109,8 +109,8 @@ CFG <- list(
   zone_names  = c("Southern hemisphere", "Northern hemisphere"),
   min_zone_clusters = 15,       # a group needs at least this many clusters in a zone to be analysed there
   umap_n      = Inf,            # UMAP: this many alpine samples (Inf = all of them) and at most as many peri-alpine and lowland samples (evenly spaced)
-  umap_top_otus = 5000,         # UMAP: the most abundant OTUs used (a dense samples x OTUs matrix: ~9,000 x 5,000 = 0.4 GB)
-  umap_pcs    = 50,             # UMAP: principal components of the Hellinger-transformed data that UMAP works on
+  umap_top_otus = 10000,         # UMAP: the most abundant OTUs used (a dense samples x OTUs matrix: ~9,000 x 5,000 = 0.4 GB)
+  umap_pcs    = 100,             # UMAP: principal components of the Hellinger-transformed data that UMAP works on
   umap_neighbors = 30,          # UMAP: size of the local neighbourhood (larger = more of the global structure, smaller = more detail)
   umap_min_dist = 0.3,          # UMAP: how tightly points may be packed (0 = tight clumps, 1 = spread out)
   umap_threads = 4,             # UMAP: threads
