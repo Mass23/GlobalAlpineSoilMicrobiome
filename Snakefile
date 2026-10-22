@@ -30,11 +30,30 @@ ALL_DATA_CSV = f"{RESULTS}/all_sampled_data.csv"
 # the flag files below are written by the analysis scripts themselves, inside the folder they are given
 DONE_1 = f"{RESULTS}/1_alpha_overview/fig1_panels.rds"
 DONE_2 = f"{RESULTS}/2_alpha_beta_elevation_latitude/.done"
+DONE_3 = f"{RESULTS}/3_distance_decay/.done"
+
+# Script 3: distance decay of community dissimilarity in alpine / peri-alpine / lowland samples. Needs perialpine_alpine and cluster_id (written
+# by prepare_microbeatlas_data) and the filtered BIOM; no climate / soil / terrain tables
+rule analysis_step_3:
+    input:
+        table=SAMPLE_DATA_FILTERED,
+        biom=FILTERED_BIOM
+    output:
+        DONE_3
+    conda:
+        "envs/r_analyses/environment.yml"
+    params:
+        out_folder=os.path.dirname(DONE_3)
+    shell:
+        """
+        Rscript scripts/3_distance_decay.R {input.table} {input.biom} {params.out_folder}
+        """
 
 rule all:
     input:
         DONE_1,
-        DONE_2
+        DONE_2,
+        DONE_3
 
 
 rule analysis_step_1:
