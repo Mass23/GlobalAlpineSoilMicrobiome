@@ -50,13 +50,16 @@
 #
 # REGION GRID (panel D): how different are alpine communities within and between regions? The regions are the continents of the alpine samples (rule-based
 #   boxes of latitude / longitude in continent_of(): check tables/region_pair_dissimilarity.csv; continents with fewer than region_min_clusters alpine
-#   clusters are left out). In each of n_rep replicates ONE random alpine sample per cluster is taken (a different one every time, at most one per thin_m
-#   metres) and the Bray-Curtis dissimilarity of ALL pairs of these samples is computed. Every cell of the grid (lower triangle: region x region; the
-#   diagonal = pairs within a region) is a violin of the dissimilarities of the pairs between the two regions, on ONE vertical scale for all cells (the
-#   bottom and top value are printed), coloured by the median (blue = similar, red = dissimilar). Rows and columns are ordered by hierarchical
-#   clustering (average linkage) of the median dissimilarities, so that regions with similar communities are next to each other. Pairs of clusters
-#   far apart are more dissimilar anyway (the distance decay of panels A, B): the median distance of the pairs of every cell is in the table.
-#
+#   clusters are left out; regions with fewer than region_warn_clusters clusters are marked with a dagger: their distributions rest on few cluster pairs, and
+#   a region with 2 clusters on ONE within-region pair, whose violin then shows only the variation between the samples drawn for those two clusters).
+#   In each of n_rep replicates ONE random alpine sample per cluster is taken (a different one every time, at most one per thin_m metres) and the
+#   Bray-Curtis dissimilarity of ALL pairs of these samples is computed. Every cell of the grid (lower triangle: region x region; the diagonal = pairs within
+#   a region) is a violin of the dissimilarities of the pairs between the two regions, on ONE vertical scale for all cells, coloured by the median (blue =
+#   similar, red = dissimilar). The dissimilarities pile up near 1, so the vertical scale is stretched there (region_axis = "log1m": -log10(1 - d + region_eps),
+#   the same in every cell; "linear" for a linear scale); the values are the ticks at the left of every row, with a light guide line in every cell. Rows and
+#   columns are ordered by hierarchical clustering (average linkage) of the median dissimilarities, so that regions with similar communities are next to
+#   each other. Pairs of clusters far apart are more dissimilar anyway (the distance decay of panels A, B): the median distance of the pairs of every cell
+#   is in the table.
 #
 # SUPPLEMENTARY (figS6_overall_dissimilarity.png): the OVERALL dissimilarity of the three groups, crude and adjusted. A, B: the pairwise
 #   dissimilarities (and the geographic distances of the pairs) of every group; C, D: the differences between the groups (A - L, P - L, A - P) estimated
@@ -130,7 +133,10 @@ CFG <- list(
   umap_min_dist = 0.3,          # UMAP: how tightly points may be packed (0 = tight clumps, 1 = spread out)
   umap_threads = 4,             # UMAP: threads
   umap_seed   = 1,              # UMAP: random seed (the embedding is reproducible)
-  region_min_clusters = 5,      # panel D: a continent needs at least this many alpine clusters to be a region of the grid
+  region_min_clusters = 2,      # panel D: a continent needs at least this many alpine clusters to be a region of the grid
+  region_warn_clusters = 5,     # panel D: regions with fewer clusters are marked with a dagger (interpret with care)
+  region_axis = "log1m",        # panel D: vertical scale of the violins: "log1m" = stretched near 1 (-log10(1 - d + region_eps)), or "linear"
+  region_eps  = 0.01,           # panel D: the smaller, the more the scale is stretched near 1 (a dissimilarity of exactly 1 is shown at -log10(eps))
   points_max  = 40000,          # pairs drawn as points (random subset; the models use all pairs)
   point_alpha = 0.05,
   cols        = c(Lowland = "#7C9885", Perialpine = "#CC79A7", Alpine = "#2B6CB0"),
@@ -359,7 +365,7 @@ region_sets <- lapply(seq_len(CFG$n_rep), function(r) {
   a <- meta[meta$group == "Alpine", ]; a <- a[sample.int(nrow(a)), ]; a <- a[!duplicated(a$cl), ]; a <- a[thin_sites(a$lat, a$lon, CFG$thin_m), ]
   a$region <- continent_of(a$lat, a$lon); a
 })
-reg_n <- table(region_sets[[1]]$region); reg_keep <- names(reg_n)[reg_n >= CFG$region_min_clusters]
+reg_n <- table(region_sets[[1]]$region); reg_keep <- names(reg_n)[reg_n >= CFG$region_min_clusters]; reg_warn <- reg_keep[reg_n[reg_keep] < CFG$region_warn_clusters]
 message(sprintf("Region grid: %d alpine clusters; continents: %s; regions with at least %d clusters: %s", nrow(region_sets[[1]]), paste(sprintf("%s %d", names(reg_n), reg_n), collapse = ", "),
                 CFG$region_min_clusters, if (length(reg_keep)) paste(reg_keep, collapse = ", ") else "none"))
 all_ids <- unique(c(unlist(lapply(analyses, function(a) unlist(lapply(a$sel, `[[`, "id")))), alp_umap$id, peri_umap$id, low_umap$id, unlist(lapply(region_sets, `[[`, "id"))))
@@ -671,6 +677,7 @@ if (!is.null(rp)) {
   sw <- rp$ra > rp$rb; tmp <- rp$ra[sw]; rp$ra[sw] <- rp$rb[sw]; rp$rb[sw] <- tmp
   cell_stats <- rp %>% group_by(ra, rb) %>% summarise(n_pairs = n(), n_cluster_pairs = n_distinct(paste(pmin(ca, cb), pmax(ca, cb))), median = median(bray), q25 = quantile(bray, 0.25),
                                                       q75 = quantile(bray, 0.75), median_km = median(geo_km), .groups = "drop") %>% as.data.frame()
+  cell_stats$few_clusters <- cell_stats$ra %in% reg_warn | cell_stats$rb %in% reg_warn                       # a region with fewer than region_warn_clusters clusters
   write.csv(cell_stats, out_t("region_pair_dissimilarity.csv"), row.names = FALSE)
   # rows and columns in the order of a hierarchical clustering of the median dissimilarities
   Mmed <- matrix(NA_real_, length(reg_keep), length(reg_keep), dimnames = list(reg_keep, reg_keep))
@@ -729,37 +736,52 @@ pC <- ggplot(nm, aes(UMAP1, UMAP2, colour = group)) +
   theme(legend.position = "top", legend.text = element_text(size = 9))
 # D: the grid of violins (lower triangle, diagonal = within a region): one vertical scale for all cells, fill = median dissimilarity (blue = similar,
 # red = dissimilar), rows and columns ordered by the clustering above. Drawn as polygons on a common coordinate system: cell (row i, column j) has its centre
-# at x = j, y = n - i + 1, and the dissimilarity of a violin maps to the height of the cell (same mapping everywhere).
+# at x = j, y = n - i + 1. The dissimilarities pile up near 1, so the vertical scale is stretched there (region_axis = "log1m": -log10(1 - d + eps), the same
+# in every cell); the dissimilarity values are the ticks at the left of every row, with a light guide line in every cell.
 pD <- NULL
 if (!is.null(rp)) {
   nR <- length(reg_order); lo <- floor(quantile(rp$bray, 0.005) * 20) / 20; lo <- min(lo, floor(min(cell_stats$q25) * 20) / 20 - 0.05)
-  ymap <- function(v, cy) cy + ((v - lo) / (1 - lo) - 0.5) * 0.9
-  polys <- list(); frames <- list(); meds <- list(); labs_n <- list()
+  use_log <- identical(CFG$region_axis, "log1m")
+  tr <- if (use_log) function(d) -log10(pmax(1 - d, 0) + CFG$region_eps) else function(d) d
+  u_lo <- tr(lo); u_hi <- tr(1)
+  ymap <- function(u, cy) cy + ((u - u_lo) / (u_hi - u_lo) - 0.5) * 0.9                       # a value on the (stretched) scale -> the height in the cell
+  # tick values: from 1 downwards, a tick is kept if it is far enough from the previous one on the stretched scale
+  cand <- if (use_log) c(1, 0.99, 0.95, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1, 0) else sort(unique(c(1, pretty(c(lo, 1), n = 4))), decreasing = TRUE)
+  cand <- cand[cand >= lo - 1e-9 & cand <= 1 + 1e-9]
+  tick_vals <- numeric(0)
+  for (cv in cand) if (!length(tick_vals) || (tr(tail(tick_vals, 1)) - tr(cv)) / (u_hi - u_lo) >= 0.17) tick_vals <- c(tick_vals, cv)
+  tick_lab <- ifelse(tick_vals == 1, "1", ifelse(abs(tick_vals * 10 - round(tick_vals * 10)) < 1e-9, sprintf("%.1f", tick_vals), sprintf("%.2f", tick_vals)))
+  polys <- list(); frames <- list(); meds <- list(); labs_n <- list(); guides_l <- list()
   for (i in seq_len(nR)) for (j in seq_len(i)) {
     a <- reg_order[j]; b <- reg_order[i]; ra <- min(a, b); rb <- max(a, b)                      # (a < b alphabetically, as stored)
-    v <- rp$bray[rp$ra == ra & rp$rb == rb]; cx <- j; cy <- nR - i + 1
+    sel_c <- rp$ra == ra & rp$rb == rb; v <- rp$bray[sel_c]; cx <- j; cy <- nR - i + 1
     frames[[length(frames) + 1]] <- data.frame(xmin = cx - 0.47, xmax = cx + 0.47, ymin = cy - 0.47, ymax = cy + 0.47)
+    guides_l[[length(guides_l) + 1]] <- data.frame(x = cx - 0.47, xend = cx + 0.47, y = ymap(tr(tick_vals), cy))
     if (length(v) < 5) next
-    dn <- density(v, from = lo, to = 1, n = 100, adjust = 1.3)
+    dn <- density(tr(v), from = u_lo, to = u_hi, n = 100, adjust = 1.3)                         # the density on the stretched scale
     hw <- 0.45 * dn$y / max(dn$y)                                                               # equal maximum width: the shape, not the number of pairs
     mv <- median(v)
     polys[[length(polys) + 1]] <- data.frame(cell = paste(i, j), x = c(cx - hw, rev(cx + hw)), y = c(ymap(dn$x, cy), rev(ymap(dn$x, cy))), median = mv)
-    meds[[length(meds) + 1]] <- data.frame(x = cx - 0.38, xend = cx + 0.38, y = ymap(mv, cy), yend = ymap(mv, cy))
-    labs_n[[length(labs_n) + 1]] <- data.frame(x = cx - 0.44, y = cy - 0.43, label = format(n_distinct(paste(pmin(rp$ca[rp$ra == ra & rp$rb == rb], rp$cb[rp$ra == ra & rp$rb == rb]),
-                                                                                              pmax(rp$ca[rp$ra == ra & rp$rb == rb], rp$cb[rp$ra == ra & rp$rb == rb]))), big.mark = ","))
+    meds[[length(meds) + 1]] <- data.frame(x = cx - 0.38, xend = cx + 0.38, y = ymap(tr(mv), cy), yend = ymap(tr(mv), cy))
+    labs_n[[length(labs_n) + 1]] <- data.frame(x = cx - 0.44, y = cy - 0.43, label = format(n_distinct(paste(pmin(rp$ca[sel_c], rp$cb[sel_c]), pmax(rp$ca[sel_c], rp$cb[sel_c]))), big.mark = ","))
   }
-  polys <- bind_rows(polys); frames <- bind_rows(frames); meds <- bind_rows(meds); labs_n <- bind_rows(labs_n)
-  reg_lab <- sprintf("%s (%d)", reg_order, as.integer(reg_n[reg_order]))
+  polys <- bind_rows(polys); frames <- bind_rows(frames); meds <- bind_rows(meds); labs_n <- bind_rows(labs_n); guides_l <- bind_rows(guides_l)
+  ticks <- bind_rows(lapply(seq_len(nR), function(i) data.frame(y = ymap(tr(tick_vals), nR - i + 1), label = tick_lab)))     # the values at the left of every row
+  reg_lab <- sprintf("%s (%d)%s", reg_order, as.integer(reg_n[reg_order]), ifelse(reg_order %in% reg_warn, " \u2020", ""))
+  note <- paste0("Bar: median\nSmall number: pairs of clusters\nBrackets: alpine clusters of the region",
+                 if (any(reg_order %in% reg_warn)) sprintf("\n\u2020 fewer than %d clusters: interpret with care", CFG$region_warn_clusters) else "")      # the rest is in the caption
   pD <- ggplot() +
     geom_rect(data = frames, aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax), fill = "white", colour = "grey80", linewidth = 0.3) +
+    geom_segment(data = guides_l, aes(x = x, xend = xend, y = y, yend = y), colour = "grey88", linewidth = 0.25, linetype = "dotted") +
     geom_polygon(data = polys, aes(x, y, group = cell, fill = median), colour = "grey25", linewidth = 0.25) +
     geom_segment(data = meds, aes(x = x, xend = xend, y = y, yend = yend), colour = "black", linewidth = 0.5) +
+    geom_segment(data = ticks, aes(x = 0.49, xend = 0.53, y = y, yend = y), colour = "grey30", linewidth = 0.3) +
+    geom_text(data = ticks, aes(x = 0.47, y = y, label = label), hjust = 1, size = 2.5, colour = "grey30") +
     geom_text(data = labs_n, aes(x, y, label = label), hjust = 0, size = 2.2, colour = "grey35") +
-    annotate("text", x = nR + 0.45, y = nR + 0.45, hjust = 1, vjust = 1, size = 2.8, lineheight = 1.1, colour = "grey25",
-             label = sprintf("Each cell: Bray-Curtis dissimilarity of the pairs of\nalpine samples of two regions (diagonal: within a region),\nthe same vertical scale in all cells (%.2f at the bottom,\n1.00 at the top); the bar = the median; the number = the\npairs of clusters. Regions in brackets: alpine clusters.", lo)) +
+    annotate("text", x = nR + 0.45, y = nR + 0.45, hjust = 1, vjust = 1, size = 2.6, lineheight = 1.1, colour = "grey25", label = note) +
     scale_fill_gradientn(colours = c("#2166AC", "#F7F7F7", "#B2182B"), name = "Median Bray-Curtis dissimilarity", limits = range(cell_stats$median),
                          values = scales::rescale(c(min(cell_stats$median), mean(range(cell_stats$median)), max(cell_stats$median)), from = range(cell_stats$median))) +
-    scale_x_continuous(breaks = seq_len(nR), labels = reg_lab, limits = c(0.5, nR + 0.5), expand = c(0, 0)) +
+    scale_x_continuous(breaks = seq_len(nR), labels = reg_lab, limits = c(0, nR + 0.5), expand = c(0, 0)) +
     scale_y_continuous(breaks = nR - seq_len(nR) + 1, labels = reg_lab, limits = c(0.5, nR + 0.5), expand = c(0, 0)) +
     coord_fixed() + labs(tag = "D", x = NULL, y = NULL) + theme_fig +
     guides(fill = guide_colourbar(title.position = "top", barwidth = unit(3, "in"), barheight = unit(0.13, "in"))) +
@@ -776,7 +798,8 @@ caption <- paste(
   stat_txt,
   sprintf("C: UMAP of the community composition (Hellinger-transformed relative abundances of the %d most abundant OTUs, %d principal components) of %s alpine, %s peri-alpine and %s lowland samples (the non-alpine ones spread evenly over latitude / longitude); ellipses = 95%% of the samples of a group. UMAP keeps neighbourhoods, not distances: the axes, the size of the clusters and the gaps between them are not quantitative.",
           CFG$umap_top_otus, CFG$umap_pcs, format(sum(nm$group == "Alpine"), big.mark = ","), format(sum(nm$group == "Perialpine"), big.mark = ","), format(sum(nm$group == "Lowland"), big.mark = ",")),
-  if (!is.null(pD)) sprintf("D: distributions of the Bray-Curtis dissimilarities of all pairs of alpine clusters within and between regions (continents; %d replicates of one random alpine sample per cluster, pairs pooled): one violin per cell, the same vertical scale in all cells, coloured by the median (red = more dissimilar); rows and columns ordered by hierarchical clustering of the medians. Far-apart regions are more dissimilar anyway (A, B): the median distance of every cell is in tables/region_pair_dissimilarity.csv.", CFG$n_rep))
+  if (!is.null(pD)) sprintf("D: distributions of the Bray-Curtis dissimilarities of all pairs of alpine clusters within and between regions (continents; %d replicates of one random alpine sample per cluster, pairs pooled): one violin per cell, the same vertical scale in all cells%s (values at the left of every row), coloured by the median (red = more dissimilar); rows and columns ordered by hierarchical clustering of the medians. Far-apart regions are more dissimilar anyway (A, B): the median distance of every cell is in tables/region_pair_dissimilarity.csv.%s", CFG$n_rep, if (identical(CFG$region_axis, "log1m")) ", stretched near 1" else "",
+                         if (any(reg_order %in% reg_warn)) sprintf(" A dagger marks regions with fewer than %d alpine clusters (%s): their distributions rest on few pairs of clusters, and a region with 2 clusters on a single within-region pair, whose violin only shows the variation between the samples drawn for those clusters; interpret with care.", CFG$region_warn_clusters, paste(reg_order[reg_order %in% reg_warn], collapse = ", ")) else ""))
 assemble_fig(file.path(out_folder, "fig3_distance_decay.png"), list(list(pA, pB), if (!is.null(pD)) list(pC, pD) else list(pC)), get_legend(pA), caption, width = 14, height = 15.5, row_heights = c(1, 1.2))
 saveRDS(list(A = pA, B = pB, C = pC, D = pD), file.path(out_folder, "fig3_panels.rds"))
 
