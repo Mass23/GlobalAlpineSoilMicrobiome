@@ -43,6 +43,18 @@
 #   intervals do not include the uncertainty of the principal components; the bootstrap distribution is centred on the estimate because repeated
 #   clusters inflate the R2 of the bootstrap samples. The difference between the groups uses independent bootstraps of the two groups.
 #
+# DIAGNOSTICS (log + tables/diagnostics_noise_ceiling_technical.csv; they change nothing in the analysis): the NOISE CEILING of the among-cluster level (the share of
+#   the variation that is reproducible between two independent sets of among_n_per_cluster samples of the same cluster: no predictor can explain more), and the
+#   share that goes with technical covariates (log10 reads and the share of unmapped reads, cluster means) alone and beyond environment + space. The unmapped READS are
+#   not in the composition (the 'Unmapped' row of the BIOM is removed: relative abundances are shares of the mapped reads).
+#
+# OTU FILTER: an OTU is kept if it is present (at least one read) in at least min_samples (default 5) of the analysed samples (alpine + lowland replicates pooled), and in
+#   at least min_prevalence of them (default 0); top_otus then caps their number (the most abundant ones; Inf = all).
+#
+# RESPONSE SENSITIVITY (fig4_response_sensitivity.png, tables/response_sensitivity.csv): the noise ceiling and the explained variance for other sets of OTUs (the n most abundant;
+#   the OTUs present in at least x of the samples) and other transformations. Rare OTUs are mostly sampling noise: if the explained share rises when they are removed, set top_otus
+#   and / or min_samples / min_prevalence accordingly.
+#
 # LIMITS: environment and geography are correlated (that is the point of the shared fraction); the environmental data are 1-250 m grids at the
 #   coordinates (and CHELSA at the sampling date, projected after 2010); study / method differences are confounded with place among clusters;
 #   the lowland replicates are evenly spread in space by design, the alpine samples are not, so the groups differ in spatial extent and in the
@@ -53,7 +65,7 @@
 #         download_earth_data) and the filtered BIOM
 # Usage : Rscript 4_variance_partitioning.R [sample_table] [all_sampled_data.csv] [filtered_biom] [out_folder]
 # Output: <out_folder>/fig4_variance_partitioning.png and tables/varpart_fractions.csv, varpart_differences.csv (per group and alpine - lowland),
-#         varpart_sensitivity.csv, predictor_sets.csv, sample_counts.csv
+#         varpart_sensitivity.csv, predictor_sets.csv, sample_counts.csv, diagnostics_noise_ceiling_technical.csv, response_sensitivity.csv (+ fig4_response_sensitivity.png)
 # Needs : R packages vegan, geosphere, rbiom, Matrix, dplyr, ggplot2, RSpectra (conda: r-vegan r-geosphere r-rbiom r-matrix r-tidyverse r-rspectra)
 # =============================================================================
 
@@ -87,7 +99,7 @@ CFG <- list(
   lowland_reps = 5,             # lowland replicates analysed (rep_01, rep_02, ...; 0 = no lowland comparison)
   alpine_draws = 5,             # random draws of the samples that form the alpine cluster means
   rare_depth  = 1000,           # samples with fewer reads are dropped
-  top_otus    = 20000,           # the most abundant OTUs of the composition
+  top_otus    = 5000,           # at most this many OTUs (the most abundant of those that pass the filters below; Inf = all of them)
   env_sets    = list(
     Climate = c("^bio[0-9]{2}$", "^(fcf|fgd|scd)$", "^(clt|cmi|hurs|pet|pr|rsds|sfcWind|spei12|spi12|tas|tasmax|tasmin|vpd)$"),
     Soil    = c("_30cm_avg$"),
@@ -101,13 +113,17 @@ CFG <- list(
   within_min_n = 10,            # a cluster needs at least this many samples for the within-cluster analysis
   within_pcs  = 200,            # principal components of the within-cluster composition
   boot        = 500,            # bootstrap resamples of the clusters
+  min_samples = 5,              # the OTUs of the composition must be present (at least one read) in at least this many of the analysed samples (alpine + lowland pooled); 0 = no filter. Rare OTUs are mostly noise: see response_sensitivity
+  min_prevalence = 0,           # ... and in at least this share of them (0 = no filter)
+  response_sensitivity = TRUE,  # how the noise ceiling and the explained variance depend on the OTUs used (number, prevalence) and on the transformation (fig4_response_sensitivity.png)
+  sens_otus   = c(50, 200, 1000, 5000, Inf), sens_prev = c(0.02, 0.05, 0.10, 0.25),   # ... the grid: the most abundant OTUs / the OTUs present in at least this share of the samples of the group
   sens_k_space = c(4, 8, 12, 20), sens_pcs_max = c(2, 4, 6),   # the grid of the sensitivity panel
   cols = c(Environment = "#009E73", Space = "#E69F00", Shared = "#9E9E9E", Unexplained = "#F0F0F0",
            Climate = "#D55E00", Soil = "#8C6D31", Terrain = "#56B4E9", SharedEnv = "#B5D99C"),
   cols_group = c(Alpine = "#2B6CB0", Lowland = "#7C9885", `Alpine - lowland` = "#222222")
 )
 if (TEST_MODE) { out_folder <- paste0(out_folder, "_TEST"); CFG$top_otus <- 300; CFG$boot <- 40; CFG$within_pcs <- 30; CFG$among_n_per_cluster <- 2; CFG$within_min_n <- 4
-                 CFG$sens_k_space <- c(4, 8); CFG$sens_pcs_max <- c(2, 4); CFG$lowland_reps <- 2; CFG$alpine_draws <- 2 }
+                 CFG$sens_k_space <- c(4, 8); CFG$sens_pcs_max <- c(2, 4); CFG$lowland_reps <- 2; CFG$alpine_draws <- 2; CFG$sens_otus <- c(50, Inf); CFG$sens_prev <- c(0.05, 0.25) }
 dir.create(file.path(out_folder, "tables"), recursive = TRUE, showWarnings = FALSE)
 out_t <- function(...) file.path(out_folder, "tables", ...)
 set.seed(1)
@@ -193,7 +209,14 @@ Prel <- X %*% Matrix::Diagonal(x = 1 / tot); rm(X)
 cols_of <- function(pat) unique(col_of[unlist(grp_idx[grepl(pat, names(grp_idx))])])
 m_alp <- Matrix::rowMeans(Prel[, cols_of("^Alpine"), drop = FALSE])
 m_low <- if (any(grepl("^Lowland", names(grp_idx)))) Matrix::rowMeans(Prel[, cols_of("^Lowland"), drop = FALSE]) else m_alp
-top <- order((m_alp + m_low) / 2, decreasing = TRUE)[seq_len(min(CFG$top_otus, nrow(Prel)))]           # ONE set of OTUs for both groups
+rank_all <- order((m_alp + m_low) / 2, decreasing = TRUE)                                              # the OTUs by mean relative abundance (alpine and lowland weighing equally)
+cols_used <- unique(col_of[unlist(grp_idx)])                                                              # the columns of the analysed samples
+n_pres_all <- Matrix::rowSums(Prel[, cols_used, drop = FALSE] > 0)                                       # in how many of the analysed samples every OTU is present
+keep_otu <- n_pres_all >= CFG$min_samples & n_pres_all / length(cols_used) >= CFG$min_prevalence
+rank_all_f <- rank_all[keep_otu[rank_all]]
+message(sprintf("OTU filter: %d of %d OTUs are present in at least %d of the %d analysed samples%s", length(rank_all_f), length(rank_all), CFG$min_samples, length(cols_used),
+                if (CFG$min_prevalence > 0) sprintf(" and in at least %.0f%% of them", 100 * CFG$min_prevalence) else ""))
+top <- rank_all_f[seq_len(min(CFG$top_otus, length(rank_all_f)))]                                       # ONE set of OTUs for both groups
 message(sprintf("Composition: %d OTUs (%.1f%% of the alpine reads, %.1f%% of the lowland reads)", length(top), 100 * sum(m_alp[top]) / sum(m_alp), 100 * sum(m_low[top]) / sum(m_low)))
 hell <- function(ix) sqrt(as.matrix(Matrix::t(Prel[top, col_of[ix], drop = FALSE])))                    # samples x OTUs, Hellinger-transformed
 
@@ -237,6 +260,32 @@ build_group <- function(ix, with_within = TRUE) {
     list(E = E, S = scale(pcnm_all[, seq_len(min(k_space, ncol(pcnm_all))), drop = FALSE], scale = FALSE))
   }
   as_ <- among_sets()
+  # DIAGNOSTICS (nothing in the analysis depends on them): (1) the NOISE CEILING = the share of the among-cluster variation that is reproducible at all: two independent
+  # sets of m samples of the same cluster (clusters with >= 2m samples) give two units; 1 - (noise variance) / (total variance across clusters); no predictor can explain
+  # more than that; (2) the TECHNICAL covariates (log10 reads, share of unmapped reads; cluster means of the same samples): their adjusted R2 alone and beyond environment + space
+  seed_keep <- get0(".Random.seed", envir = globalenv(), inherits = FALSE)                 # the diagnostics draw random samples: the random stream of the analysis is restored after them
+  diag <- tryCatch({
+    resp_all <- c(list(Composition = Hh), lapply(setNames(seq_len(ncol(A)), colnames(A)), function(j) A[, j, drop = FALSE]))
+    cl_2 <- names(cl_n)[cl_n >= 2 * m]
+    ceil <- vapply(names(resp_all), function(rn) {
+      if (length(cl_2) < 15) return(NA_real_); Yr <- resp_all[[rn]]; pcol <- ncol(Yr)
+      two <- lapply(cl_2, function(cc) { sm <- sample(which(cl == cc)); list(sm[seq_len(m)], sm[m + seq_len(m)]) })
+      U1 <- matrix(vapply(two, function(z) colMeans(Yr[z[[1]], , drop = FALSE]), numeric(pcol)), ncol = pcol, byrow = TRUE)
+      U2 <- matrix(vapply(two, function(z) colMeans(Yr[z[[2]], , drop = FALSE]), numeric(pcol)), ncol = pcol, byrow = TRUE)
+      Tv <- (sum(apply(U1, 2, var)) + sum(apply(U2, 2, var))) / 2; Nv <- mean(rowSums((U1 - U2)^2)) / 2
+      max(0, min(1, 1 - Nv / Tv)) }, 1)
+    tech <- NULL
+    if (all(c("unmapped_raw_counts", "total_raw_counts") %in% names(t_g))) {
+      tv <- cbind(log10_reads = log10(t_g$alpha_total_n_reads), unmapped = t_g$unmapped_raw_counts / t_g$total_raw_counts)
+      for (j in 1:2) tv[!is.finite(tv[, j]), j] <- median(tv[is.finite(tv[, j]), j])
+      Ta <- scale(rowmean(tv[pick, , drop = FALSE], cl_p), scale = FALSE); Eall <- do.call(cbind, as_$E)
+      ra <- c(list(Composition = Ha), lapply(setNames(seq_len(ncol(Aa)), colnames(Aa)), function(j) Aa[, j, drop = FALSE]))
+      tech <- bind_rows(lapply(names(ra), function(rn) { Y <- scale(ra[[rn]], scale = FALSE); cm <- commonality(list(E = Eall, S = as_$S, T = Ta), Y, sum(Y^2), nrow(Y) - 1)
+        data.frame(response = rn, env_space = cm$R(3), tech_alone = cm$R(4), tech_beyond_env_space = cm$fractions$value[cm$fractions$fraction == "T"]) }))
+    }
+    list(ceiling = data.frame(response = names(ceil), noise_ceiling = unname(ceil), clusters_used = length(cl_2)), tech = tech)
+  }, error = function(e) NULL)
+  if (!is.null(seed_keep)) assign(".Random.seed", seed_keep, envir = globalenv())
   L_a <- list(level = "Among clusters", rows = as.list(seq_len(n_a)), E_sets = as_$E, S = as_$S,
               prep = function(Y, rs, idx, n_units) { Yb <- scale(Y[idx, , drop = FALSE], scale = FALSE)
                 list(Y = Yb, ss_tot = sum(Yb^2), df_tot = length(idx) - 1, E_sets = lapply(as_$E, function(M) scale(M[idx, , drop = FALSE], scale = FALSE)), S = scale(as_$S[idx, , drop = FALSE], scale = FALSE)) })
@@ -261,7 +310,7 @@ build_group <- function(ix, with_within = TRUE) {
   info <- bind_rows(lapply(names(as_$E), function(nm) data.frame(level = "Among clusters", set = nm, variables = attr(as_$E[[nm]], "n_vars"), components = ncol(as_$E[[nm]]), variance_of_the_variables = attr(as_$E[[nm]], "var"))),
                     data.frame(level = "Among clusters", set = "Space", variables = NA, components = ncol(as_$S), variance_of_the_variables = NA))
   rm(list = intersect(c("Hh", "Hw", "Aw", "Ew"), ls()))             # the closures below keep this whole environment alive: free the big sample x OTU matrices first
-  list(among = list(L = L_a, resp = resp_a), within = wi, Ha = Ha, among_sets = among_sets, info = info,
+  list(among = list(L = L_a, resp = resp_a), within = wi, Ha = Ha, among_sets = among_sets, info = info, diag = diag, units = list(ix = ix, cl = cl, pick = pick, cl_p = cl_p),
        counts = data.frame(samples = length(ix), clusters_among = n_a, mean_cluster_size = mean(as.numeric(cl_n[cl_a])), clusters_within = if (is.null(wi)) 0 else wi$clusters, samples_within = if (is.null(wi)) 0 else wi$samples))
 }
 message("Building the groups (", length(grp_idx), " data sets: alpine draws and lowland replicates) ...")
@@ -335,6 +384,74 @@ for (gr in c(unique(grp_of))) for (lv in c("Among clusters", "Within clusters"))
                   100 * (1 - max(0, v[["All sets together"]])), fmt(d$estimate[1]), fmt(d$lo[1]), fmt(d$hi[1])))
 }
 if (any(diffs$group == "Alpine - lowland")) for (i in which(diffs$group == "Alpine - lowland")) message(sprintf("  Alpine - lowland | %s | %-16s (environment - space) in alpine minus in lowland: %s [%s, %s]", diffs$level[i], diffs$response[i], fmt(diffs$estimate[i]), fmt(diffs$lo[i]), fmt(diffs$hi[i])))
+
+# the diagnostics: the noise ceiling and the technical covariates (medians over the data sets of a group)
+diag_tab <- bind_rows(lapply(names(G), function(nm) { d <- G[[nm]]$diag; if (is.null(d)) return(NULL); x <- d$ceiling; if (!is.null(d$tech)) x <- merge(x, d$tech, by = "response", all.x = TRUE, sort = FALSE)
+  cbind(group = sub("\\|.*", "", nm), data_set = nm, x) }))
+if (nrow(diag_tab)) {
+  dsum <- diag_tab %>% group_by(group, response) %>% summarise(across(where(is.numeric), ~ median(.x, na.rm = TRUE)), .groups = "drop") %>% as.data.frame()
+  dsum$explained_share_of_ceiling <- ifelse(is.finite(dsum$noise_ceiling) & dsum$noise_ceiling > 0, dsum$env_space / dsum$noise_ceiling, NA)
+  write.csv(dsum, out_t("diagnostics_noise_ceiling_technical.csv"), row.names = FALSE)
+  pc <- function(x) ifelse(is.finite(x), sprintf("%.1f%%", 100 * x), "NA")
+  message("Diagnostics, among clusters (the share of the variation that is reproducible at all, and what the technical covariates take):")
+  for (i in seq_len(nrow(dsum))) { d <- dsum[i, ]; message(sprintf("  %-7s | %-16s noise ceiling %s (from %.0f clusters with >= %d samples); environment + space explain %s (%s of the ceiling); read depth + unmapped share: alone %s, beyond environment + space %s",
+    d$group, d$response, pc(d$noise_ceiling), d$clusters_used, 2 * CFG$among_n_per_cluster, pc(d$env_space), ifelse(is.finite(d$explained_share_of_ceiling), sprintf("%.0f%%", 100 * d$explained_share_of_ceiling), "NA"),
+    if ("tech_alone" %in% names(d)) pc(d$tech_alone) else "not computed", if ("tech_beyond_env_space" %in% names(d)) pc(d$tech_beyond_env_space) else "not computed")) }
+}
+
+# RESPONSE SENSITIVITY (among clusters, composition; the first alpine draw and the first lowland replicate, with the same units and predictors as the analysis):
+# for several sets of OTUs (the n most abundant; the OTUs present in at least x of the samples of the group) and three transformations (square root = Hellinger; relative
+# abundance, which lets the abundant OTUs dominate; log(1 + 1000 p)), the NOISE CEILING (the share of the among-cluster variation that two independent sets of
+# among_n_per_cluster samples of the same cluster have in common) and the variance that environment + space explain.
+resp_sens <- NULL
+if (isTRUE(CFG$response_sensitivity)) resp_sens <- tryCatch({
+  m <- CFG$among_n_per_cluster; seed_keep <- get0(".Random.seed", envir = globalenv(), inherits = FALSE)
+  tfs <- list(`Hellinger (sqrt)` = function(M) { M <- as(M, "dgCMatrix"); M@x <- sqrt(M@x); M }, `Relative abundance` = function(M) as(M, "dgCMatrix"),
+              `log(1 + 1000 p)` = function(M) { M <- as(M, "dgCMatrix"); M@x <- log1p(1000 * M@x); M })
+  avg_mat <- function(cl_vec, rows_n) { u <- sort(unique(cl_vec)); Matrix::sparseMatrix(i = seq_len(rows_n), j = match(cl_vec, u), x = 1 / m, dims = c(rows_n, length(u))) }
+  one_group <- function(gname, g) {
+    u <- g$units; cols_g <- col_of[u$ix]; W <- avg_mat(u$cl_p, length(u$pick)); Eall <- do.call(cbind, g$among$L$E_sets); S <- g$among$L$S
+    cl_tab <- table(u$cl); cl_2 <- names(cl_tab)[cl_tab >= 2 * m]
+    two <- lapply(cl_2, function(cc) { sm <- sample(which(u$cl == cc)); list(sm[seq_len(m)], sm[m + seq_len(m)]) })
+    r1 <- unlist(lapply(two, `[[`, 1)); r2 <- unlist(lapply(two, `[[`, 2)); W12 <- avg_mat(rep(cl_2, each = m), length(r1))
+    prev_g <- Matrix::rowMeans(Prel[, cols_g, drop = FALSE] > 0)
+    variant <- function(sel, tf_name, label, type) {
+      tfn <- tfs[[tf_name]]; U <- as.matrix(Matrix::t(tfn(Prel[sel, cols_g[u$pick], drop = FALSE]) %*% W)); Y <- scale(U, scale = FALSE)
+      p <- partition2(Eall, S, Y, sum(Y^2), nrow(Y) - 1); ceil <- NA_real_
+      if (length(cl_2) >= 15) { U1 <- as.matrix(Matrix::t(tfn(Prel[sel, cols_g[r1], drop = FALSE]) %*% W12)); U2 <- as.matrix(Matrix::t(tfn(Prel[sel, cols_g[r2], drop = FALSE]) %*% W12))
+        Tv <- (sum(apply(U1, 2, var)) + sum(apply(U2, 2, var))) / 2; Nv <- mean(rowSums((U1 - U2)^2)) / 2; ceil <- max(0, min(1, 1 - Nv / Tv)) }
+      data.frame(group = gname, transform = tf_name, selection = label, type = type, n_otus = length(sel), noise_ceiling = ceil, explained = p[["explained"]],
+                 pure_E = p[["pure_E"]], shared = p[["shared"]], pure_S = p[["pure_S"]], stringsAsFactors = FALSE)
+    }
+    bind_rows(lapply(names(tfs), function(tn) bind_rows(
+      lapply(CFG$sens_otus, function(K) { sel <- rank_all[seq_len(min(K, length(rank_all)))]; variant(sel, tn, if (is.finite(K)) paste("top", K) else "all OTUs", "most abundant") }),
+      lapply(CFG$sens_prev, function(x) { sel <- rank_all[prev_g[rank_all] >= x]; if (length(sel) < 10) NULL else variant(sel, tn, sprintf("present in >= %.0f%%", 100 * x), "prevalence") }),
+      if (CFG$min_samples > 0) list({ sel <- rank_all[n_pres_all[rank_all] >= CFG$min_samples]; if (length(sel) < 10) NULL else variant(sel, tn, sprintf("present in >= %d samples (the filter)", CFG$min_samples), "min_samples") }))))
+  }
+  gs <- list(Alpine = G[["Alpine|draw1"]], Lowland = G[[which(grp_of == "Lowland")[1]]])
+  out <- bind_rows(lapply(names(gs), function(gn) if (is.null(gs[[gn]])) NULL else one_group(gn, gs[[gn]])))
+  if (!is.null(seed_keep)) assign(".Random.seed", seed_keep, envir = globalenv()); out
+}, error = function(e) { message("Response sensitivity not computed: ", conditionMessage(e)); NULL })
+if (!is.null(resp_sens) && nrow(resp_sens)) {
+  write.csv(resp_sens, out_t("response_sensitivity.csv"), row.names = FALSE)
+  pc1 <- function(x) ifelse(is.finite(x), sprintf("%.1f%%", 100 * x), "NA")
+  message(sprintf("Response sensitivity (among clusters, composition; the analysis uses %d OTUs, Hellinger transformation; the filter variant is the one with >= %d samples):", length(top), CFG$min_samples))
+  for (gn in unique(resp_sens$group)) for (tn in unique(resp_sens$transform)) { d <- resp_sens[resp_sens$group == gn & resp_sens$transform == tn, ]; b <- d[which.max(d$explained), ]; a <- d[d$selection == "all OTUs", ]
+    message(sprintf("  %-7s | %-18s best: %-18s (%d OTUs) explains %s of a noise ceiling of %s%s", gn, tn, b$selection, b$n_otus, pc1(b$explained), pc1(b$noise_ceiling),
+                    if (nrow(a)) sprintf("; all %d OTUs: %s of %s", a$n_otus[1], pc1(a$explained[1]), pc1(a$noise_ceiling[1])) else "")) }
+  rs <- resp_sens %>% tidyr::pivot_longer(c(noise_ceiling, explained, pure_E, pure_S), names_to = "quantity", values_to = "value") %>% as.data.frame()
+  rs$quantity <- factor(c(noise_ceiling = "Noise ceiling", explained = "Environment + space", pure_E = "Environment only", pure_S = "Space only")[rs$quantity], levels = c("Noise ceiling", "Environment + space", "Environment only", "Space only"))
+  rs$transform <- factor(rs$transform, levels = names(tfs)); rs$value <- pmax(rs$value, 0)
+  pR <- ggplot(rs, aes(n_otus, value, colour = quantity, linetype = quantity)) + geom_line(data = rs[rs$type != "min_samples", ], aes(group = interaction(quantity, type)), linewidth = 0.5, alpha = 0.6) + geom_point(aes(shape = type), size = 2) +
+    scale_x_log10(labels = scales::comma) + scale_y_continuous(labels = scales::percent) +
+    scale_colour_manual(values = c("Noise ceiling" = "grey40", "Environment + space" = "black", "Environment only" = CFG$cols[["Environment"]], "Space only" = CFG$cols[["Space"]]), name = NULL) +
+    scale_linetype_manual(values = c("Noise ceiling" = "dashed", "Environment + space" = "solid", "Environment only" = "solid", "Space only" = "solid"), name = NULL) + scale_shape_manual(values = c("most abundant" = 16, prevalence = 17, min_samples = 15), name = "OTUs chosen by") +
+    facet_grid(transform ~ group) + labs(x = "Number of OTUs in the composition", y = "Share of the among-cluster variation (adjusted R2 for the predictors)") + theme_fig + theme(legend.position = "top")
+  cap_r <- "Response sensitivity. Among-cluster composition, with the same units and predictors as Figure 4, for sets of OTUs chosen by abundance (the n most abundant) or by prevalence (present in at least x of the samples of the group; the square = present in at least min_samples samples, the filter of the analysis) and three transformations. Dashed: the noise ceiling, the share of the variation that two independent sets of samples of the same cluster have in common (no predictor can explain more); solid: the variance explained by the environment and space together, by the environment only and by space only (adjusted R2, below 0 shown as 0). If the explained share rises when rare OTUs are removed, they are noise; the analysis uses the OTUs of top_otus and min_prevalence."
+  cl_r <- strwrap(cap_r, 150); png(file.path(out_folder, "fig4_response_sensitivity.png"), width = 11, height = 9.5 + 0.17 * length(cl_r), units = "in", res = 300)
+  grid.newpage(); pushViewport(viewport(layout = grid.layout(2, 1, heights = unit.c(unit(1, "null"), unit(0.17 * length(cl_r) + 0.2, "in"))))); print(pR, vp = viewport(layout.pos.row = 1))
+  pushViewport(viewport(layout.pos.row = 2)); grid.text(paste(cl_r, collapse = "\n"), x = 0.01, just = "left", gp = gpar(fontsize = 9)); popViewport(2); dev.off()
+}
 
 ## ---- 4. Figure --------------------------------------------------------------------------------------------------------------------------------------
 grp_lev <- intersect(c("Alpine", "Lowland"), unique(fractions$group)); resp_lab <- unique(fractions$response); lv_lab <- intersect(c("Among clusters", "Within clusters"), unique(fractions$level))
