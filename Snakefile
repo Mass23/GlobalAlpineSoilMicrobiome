@@ -31,6 +31,15 @@ ALL_DATA_CSV = f"{RESULTS}/all_sampled_data.csv"
 DONE_1 = f"{RESULTS}/1_alpha_overview/fig1_panels.rds"
 DONE_2 = f"{RESULTS}/2_alpha_beta_elevation_latitude/.done"
 DONE_3 = f"{RESULTS}/3_distance_decay/.done"
+DONE_4 = f"{RESULTS}/4_variance_partitioning/.done"
+
+# The first rule is the default target of `snakemake`: everything
+rule all:
+    input:
+        DONE_1,
+        DONE_2,
+        DONE_3,
+        DONE_4
 
 # Script 3: distance decay of community dissimilarity in alpine / peri-alpine / lowland samples. Needs perialpine_alpine and cluster_id (written
 # by prepare_microbeatlas_data) and the filtered BIOM; no climate / soil / terrain tables
@@ -49,11 +58,23 @@ rule analysis_step_3:
         Rscript scripts/3_distance_decay.R {input.table} {input.biom} {params.out_folder}
         """
 
-rule all:
+# Script 4: variation partitioning of the alpine microbiome (composition and alpha diversity) between the environment (climate + soil + terrain,
+# all_sampled_data.csv) and geography; needs the soil download through all_sampled_data.csv
+rule analysis_step_4:
     input:
-        DONE_1,
-        DONE_2,
-        DONE_3
+        table=SAMPLE_DATA_FILTERED,
+        env=ALL_DATA_CSV,
+        biom=FILTERED_BIOM
+    output:
+        DONE_4
+    conda:
+        "envs/r_analyses/environment.yml"
+    params:
+        out_folder=os.path.dirname(DONE_4)
+    shell:
+        """
+        Rscript scripts/4_variance_partitioning.R {input.table} {input.env} {input.biom} {params.out_folder}
+        """
 
 
 rule analysis_step_1:

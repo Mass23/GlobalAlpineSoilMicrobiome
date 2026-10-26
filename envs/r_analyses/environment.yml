@@ -1,6 +1,7 @@
 name: alpine-soil-r
 # One environment for all R analyses:
-#   microbeatlas_filter_data.R, 1_alpha_overview.R, 2_alpha_beta_elevation_latitude.R
+#   microbeatlas_filter_data.R, 1_alpha_overview.R, 2_alpha_beta_elevation_latitude.R,
+#   3_distance_decay.R, 4_variance_partitioning.R
 channels:
   - conda-forge
   - bioconda
@@ -12,7 +13,8 @@ dependencies:
   - r-tidyverse
   - r-data.table
 
-  # statistics (GAMs, sparse matrices) and ecology (diversity, dissimilarities)
+  # statistics (GAMs, sparse matrices) and ecology (diversity, dissimilarities,
+  # variation partitioning and PCNM spatial eigenvectors in script 4)
   - r-mgcv
   - r-matrix
   - r-vegan
@@ -33,5 +35,6 @@ dependencies:
   - proj-data
   - gdal
 
-  # umap
+  # umap (script 3) and partial SVD of the composition (scripts 3 and 4)
   - r-uwot
+  - r-rspectra
