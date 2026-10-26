@@ -46,7 +46,7 @@
 #
 # UMAP (panel C): a two-dimensional map of the community composition of ALL alpine samples (umap_n = Inf) and as many lowland samples (spread
 #   evenly over latitude / longitude, at most one per thin_m metres). Lowland samples are grey, alpine samples are coloured by mountain range (the
-#   n_top_ranges ranges with the most samples and the largest range of every continent; the others together), each range with a 95% ellipse. The relative abundances of the umap_top_otus most abundant OTUs are
+#   n_top_ranges ranges with the most samples and the largest range of every continent; the others together), each range with a 95% ellipse; the colours are one colour family per continent (Europe reds, Asia blues, North America greens, South America oranges, Oceania purples, Africa golds), the ranges of a continent being shades of it (the largest the darkest), and the legend is grouped by continent. The relative abundances of the umap_top_otus most abundant OTUs are
 #   Hellinger-transformed (square root), reduced to umap_pcs principal components and embedded with UMAP (package uwot, Euclidean distance on the
 #   components: a few minutes for ~9,000 samples). UMAP keeps the NEIGHBOURHOODS of samples, not the distances between groups: the position and
 #   size of a cluster and the gaps between clusters are not quantitative, the axes have no meaning, and the picture depends somewhat on
@@ -177,7 +177,8 @@ CFG <- list(
   n_top_ranges = 14,            # panels C, D: the ranges with the most alpine samples get a colour (and links on the map); the others are "Other ranges"
   range_each_continent = TRUE,  # ... and so does the largest range of every continent (if it has at least range_min_samples alpine samples), so that no continent is missing
   range_min_samples = 30,
-  cols_ranges = c("#0072B2", "#D55E00", "#009E73", "#E69F00", "#CC79A7", "#56B4E9", "#7B3294", "#B2182B", "#117733", "#8C6D31", "#332288", "#88CCEE", "#AA4499", "#999933", "#44AA99", "#882255"),   # colours of the coloured ranges (at most 16), in order of size
+  cols_continent_shades = list(Europe = c("#8B0000", "#F4796B"), Asia = c("#08306B", "#6BAED6"), "North America" = c("#00441B", "#74C476"), "South America" = c("#7F2704", "#FDAE6B"),
+                               Oceania = c("#3F007D", "#B3A2D6"), Africa = c("#6B4F00", "#E6C229"), Antarctica = c("#1F3B4D", "#8FB5C9"), Other = c("#00695C", "#80CBC4")),   # panels C, D: dark and light end of the shades of the ranges of a continent (the largest range gets the darkest)
   col_other_ranges = "#5F5F5F", col_lowland = "#C9C9C9"
 )
 if (TEST_MODE) {
@@ -446,10 +447,11 @@ low_umap <- umap_pick(meta[meta$group == "Lowland", ], n_umap)
 alp_umap$region <- region_of(alp_umap$lon, alp_umap$lat)
 range_n <- sort(table(alp_umap$region[alp_umap$region != "Other"]), decreasing = TRUE)
 top_ranges <- names(range_n)[seq_len(min(CFG$n_top_ranges, length(range_n)))]
-# ... plus the largest range of every continent that is not in yet (the continent of the centre of the range), if it has enough samples
+# the continent of every range (the continent of the centre of its samples)
+cen <- alp_umap[alp_umap$region != "Other", ] %>% group_by(region) %>% summarise(lon = mean(lon), lat = mean(lat), .groups = "drop") %>% as.data.frame()
+cen$continent <- continent_of(cen$lat, cen$lon); cen$n <- as.integer(range_n[cen$region])
+# ... plus the largest range of every continent that is not in yet, if it has enough samples
 if (isTRUE(CFG$range_each_continent) && length(range_n)) {
-  cen <- alp_umap[alp_umap$region != "Other", ] %>% group_by(region) %>% summarise(lon = mean(lon), lat = mean(lat), .groups = "drop") %>% as.data.frame()
-  cen$continent <- continent_of(cen$lat, cen$lon); cen$n <- as.integer(range_n[cen$region])
   have <- cen$continent[cen$region %in% top_ranges]
   for (cn in setdiff(unique(cen$continent), c("Other", have))) {
     cand <- cen[cen$continent == cn & cen$n >= CFG$range_min_samples, ]
@@ -457,11 +459,15 @@ if (isTRUE(CFG$range_each_continent) && length(range_n)) {
   }
 }
 top_ranges <- top_ranges[order(-as.integer(range_n[top_ranges]))]
-if (length(top_ranges) > length(CFG$cols_ranges)) { message("  more coloured ranges than colours (", length(CFG$cols_ranges), "): the smallest are in Other ranges"); top_ranges <- top_ranges[seq_along(CFG$cols_ranges)] }
 rest <- setdiff(names(range_n), top_ranges)
 if (length(rest)) message(sprintf("  next ranges, not coloured (raise n_top_ranges to include them): %s", paste(sprintf("%s (%d)", head(rest, 12), as.integer(range_n[head(rest, 12)])), collapse = ", ")))
 alp_umap$range_class <- ifelse(alp_umap$region %in% top_ranges, alp_umap$region, "Other ranges")
-range_cols <- setNames(CFG$cols_ranges[seq_along(top_ranges)], top_ranges)
+range_continent <- setNames(cen$continent, cen$region)[top_ranges]                          # one colour family per continent; the ranges of a continent are shades of it, the largest the darkest
+range_cols <- setNames(rep(NA_character_, length(top_ranges)), top_ranges)
+for (cn in unique(range_continent)) {
+  rg <- top_ranges[range_continent == cn]; ends <- CFG$cols_continent_shades[[if (cn %in% names(CFG$cols_continent_shades)) cn else "Other"]]
+  range_cols[rg] <- if (length(rg) == 1) colorRampPalette(ends)(3)[2] else colorRampPalette(ends)(length(rg))
+}
 message(sprintf("UMAP samples: %d alpine samples in %d %s, %d without a range; the %d with the most samples: %s; and %d lowland samples (evenly spaced over latitude / longitude, at most one per %g m)",
                 nrow(alp_umap), length(range_n), region_kind, sum(alp_umap$region == "Other"), length(top_ranges),
                 paste(sprintf("%s (%d)", top_ranges, range_n[top_ranges]), collapse = ", "), nrow(low_umap), CFG$thin_m))
@@ -985,8 +991,24 @@ pC <- ggplot(nm, aes(UMAP1, UMAP2, colour = range_class)) +
   guides(colour = guide_legend(ncol = 1, override.aes = list(size = 4.5, alpha = 1))) +
   annotate("label", x = -Inf, y = -Inf, hjust = 0, vjust = 0, label = umap_note, size = 2.9, lineheight = 1.05, fill = "white", alpha = 0.88, label.size = 0) +
   labs(tag = "C", x = "UMAP 1", y = "UMAP 2") + theme_fig + theme(legend.position = "none")
-leg_C <- get_legend(pC + theme(legend.title = element_text(size = 11), legend.text = element_text(size = 11)), "right")
-pC_leg <- ggplot() + annotation_custom(leg_C, xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = Inf) + theme_void()
+# the legend of C: grouped by continent (a ggplot legend has no group headings), drawn as a panel of its own
+cont_n <- tapply(as.integer(n_cat[top_ranges]), range_continent, sum); cont_order <- names(sort(cont_n, decreasing = TRUE))
+rows_l <- list(data.frame(label = "Alpine samples by mountain range", kind = "title", col = NA_character_, stringsAsFactors = FALSE))
+for (cn in cont_order) {
+  rows_l[[length(rows_l) + 1]] <- data.frame(label = cn, kind = "head", col = NA_character_, stringsAsFactors = FALSE)
+  rg <- top_ranges[range_continent == cn]
+  rows_l[[length(rows_l) + 1]] <- data.frame(label = lab_cat[rg], kind = "item", col = unname(range_cols[rg]), stringsAsFactors = FALSE)
+}
+rest_l <- c(if ("Other ranges" %in% cat_levels) "Other ranges", "Lowland")
+rows_l[[length(rows_l) + 1]] <- data.frame(label = "Not coloured", kind = "head", col = NA_character_, stringsAsFactors = FALSE)
+rows_l[[length(rows_l) + 1]] <- data.frame(label = lab_cat[rest_l], kind = "item", col = unname(cols_cat[rest_l]), stringsAsFactors = FALSE)
+LG <- bind_rows(rows_l); LG$y <- rev(seq_len(nrow(LG))); txt_size <- min(4.1, 4.1 * 26 / nrow(LG))
+pC_leg <- ggplot(LG) +
+  geom_text(data = LG[LG$kind == "title", ], aes(x = 0, y = y, label = label), hjust = 0, fontface = "bold", size = txt_size * 1.05) +
+  geom_text(data = LG[LG$kind == "head", ], aes(x = 0, y = y, label = label), hjust = 0, fontface = "bold", size = txt_size) +
+  geom_point(data = LG[LG$kind == "item", ], aes(x = 0.05, y = y, colour = col), size = txt_size * 1.15) +
+  geom_text(data = LG[LG$kind == "item", ], aes(x = 0.13, y = y, label = label), hjust = 0, size = txt_size) +
+  scale_colour_identity() + scale_x_continuous(limits = c(0, 1.3), expand = c(0, 0)) + scale_y_continuous(limits = c(0.4, nrow(LG) + 0.6), expand = c(0, 0)) + theme_void()
 
 # S8: the grid of violins (lower triangle, diagonal = within a region): one vertical scale for all cells, fill = median dissimilarity (blue = similar,
 # red = dissimilar), rows and columns ordered by the clustering above. Drawn as polygons on a common coordinate system: cell (row i, column j) has its centre
@@ -1132,7 +1154,7 @@ caption <- paste(
           if (CFG$df_dist > 1) sprintf("; natural spline with %d df", CFG$df_dist) else ""),
   sprintf("Each of %d replicates: %d samples per group (one random sample per BioProject / location cluster, at least %g m apart, cut down evenly over %g-degree latitude / longitude cells) and up to %d pairs per group (random within classes of geographic distance); the pairs of all replicates are analysed together.", CFG$n_rep, n_main, CFG$thin_m, CFG$even_cell_deg, CFG$n_pairs),
   stat_txt,
-  sprintf("C: UMAP of the community composition (Hellinger-transformed relative abundances of the %d most abundant OTUs, %d principal components) of %s alpine samples, coloured by %s (the number of samples in brackets; the other ranges together as Other ranges), and %s lowland samples spread evenly over latitude / longitude (grey); ellipses = 95%% of the samples of a range. UMAP keeps neighbourhoods, not distances: the axes, the size of the clusters and the gaps between them are not quantitative.",
+  sprintf("C: UMAP of the community composition (Hellinger-transformed relative abundances of the %d most abundant OTUs, %d principal components) of %s alpine samples, coloured by %s (one colour family per continent: Europe reds, Asia blues, North America greens, South America oranges, Oceania purples, Africa golds; the largest range of a continent the darkest; the number of samples in brackets; the other ranges together as Other ranges), and %s lowland samples spread evenly over latitude / longitude (grey); ellipses = 95%% of the samples of a range. UMAP keeps neighbourhoods, not distances: the axes, the size of the clusters and the gaps between them are not quantitative.",
           CFG$umap_top_otus, CFG$umap_pcs, format(sum(nm$group == "Alpine"), big.mark = ","), region_kind, format(sum(nm$group == "Lowland"), big.mark = ",")),
   umap_cap,
   if (!is.null(pD)) sprintf("D: network of the mountain ranges (%s; %d ranges, the %d coloured ones named; colours as in C, size of a node = number of alpine samples). The nodes are placed by classical multidimensional scaling of the median Bray-Curtis dissimilarity of all pairs of alpine clusters of two ranges (%d replicates of one random alpine sample per cluster, pairs pooled), adjusted to the median differences in sequencing depth and unmapped proportion but NOT for geographic distance: ranges with similar communities lie close together, distance included (the two axes show %.0f%% of the variation). Edges: every range linked to its %d most similar ranges and the minimum spanning tree, coloured by the median dissimilarity. Supplementary Figure 7 also shows the dissimilarity at the same geographic distance.", region_kind, length(reg_all), length(top_ranges), CFG$n_rep, 100 * L_main$share, CFG$net_k))
