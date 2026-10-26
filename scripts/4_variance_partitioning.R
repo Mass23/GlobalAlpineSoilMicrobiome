@@ -87,7 +87,7 @@ CFG <- list(
   lowland_reps = 5,             # lowland replicates analysed (rep_01, rep_02, ...; 0 = no lowland comparison)
   alpine_draws = 5,             # random draws of the samples that form the alpine cluster means
   rare_depth  = 1000,           # samples with fewer reads are dropped
-  top_otus    = 5000,           # the most abundant OTUs of the composition
+  top_otus    = 20000,           # the most abundant OTUs of the composition
   env_sets    = list(
     Climate = c("^bio[0-9]{2}$", "^(fcf|fgd|scd)$", "^(clt|cmi|hurs|pet|pr|rsds|sfcWind|spei12|spi12|tas|tasmax|tasmin|vpd)$"),
     Soil    = c("_30cm_avg$"),
