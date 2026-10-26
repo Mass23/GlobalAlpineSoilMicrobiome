@@ -40,24 +40,39 @@
 #   LIMITS: the tests cannot see spatial autocorrelation between DIFFERENT clusters (neighbouring regions resemble each other): judge
 #   robustness by the size of the effects.
 #
-# UMAP (panels C, D): two-dimensional maps of the community composition. C: ALL alpine samples (umap_n = Inf) and, from each of the peri-alpine
-#   and the lowland group, as many samples (at most; spread evenly over latitude / longitude, at most one per thin_m metres), coloured by group
-#   with 95% ellipses. D: the alpine samples only, coloured by continent (rule-based boxes in continent_of(): check tables/umap_alpine_samples.csv),
-#   with 95% ellipses; by default (umap_continents_own = TRUE) D has its OWN embedding of the alpine samples, so that the structure WITHIN the alpine
-#   samples is not squeezed by the difference to the lowland samples (FALSE: the embedding of C, the other groups in grey). The relative abundances of the
-#   umap_top_otus most abundant OTUs are Hellinger-transformed (square root), reduced to umap_pcs principal components and embedded with UMAP
-#   (package uwot, Euclidean distance on the components: about a minute for ~9,000 samples). UMAP keeps the NEIGHBOURHOODS of samples, not the
-#   distances between groups: the position and size of a cluster and the gaps between clusters are not quantitative, the axes have no meaning,
-#   and the picture depends somewhat on umap_neighbors and umap_min_dist (fixed seed: reproducible). Needs the R packages uwot and RSpectra
-#   (conda: r-uwot, r-rspectra).
+# UMAP (panel C): a two-dimensional map of the community composition: ALL alpine samples (umap_n = Inf) and, from each of the peri-alpine and the
+#   lowland group, as many samples (at most; spread evenly over latitude / longitude, at most one per thin_m metres), coloured by group with 95%
+#   ellipses. The relative abundances of the umap_top_otus most abundant OTUs are Hellinger-transformed (square root), reduced to umap_pcs principal
+#   components and embedded with UMAP (package uwot, Euclidean distance on the components: a few minutes for ~9,000 samples). UMAP keeps the
+#   NEIGHBOURHOODS of samples, not the distances between groups: the position and size of a cluster and the gaps between clusters are not
+#   quantitative, the axes have no meaning, and the picture depends somewhat on umap_neighbors and umap_min_dist (fixed seed: reproducible).
+#   Needs the R packages uwot and RSpectra (conda: r-uwot, r-rspectra).
+#
+# REGION GRID (panel D): how different are alpine communities within and between regions? The regions are the continents of the alpine samples (rule-based
+#   boxes of latitude / longitude in continent_of(): check tables/region_pair_dissimilarity.csv; continents with fewer than region_min_clusters alpine
+#   clusters are left out). In each of n_rep replicates ONE random alpine sample per cluster is taken (a different one every time, at most one per thin_m
+#   metres) and the Bray-Curtis dissimilarity of ALL pairs of these samples is computed. Every cell of the grid (lower triangle: region x region; the
+#   diagonal = pairs within a region) is a violin of the dissimilarities of the pairs between the two regions, on ONE vertical scale for all cells (the
+#   bottom and top value are printed), coloured by the median (blue = similar, red = dissimilar). Rows and columns are ordered by hierarchical
+#   clustering (average linkage) of the median dissimilarities, so that regions with similar communities are next to each other. Pairs of clusters
+#   far apart are more dissimilar anyway (the distance decay of panels A, B): the median distance of the pairs of every cell is in the table.
+#
+#
+# SUPPLEMENTARY (figS6_overall_dissimilarity.png): the OVERALL dissimilarity of the three groups, crude and adjusted. A, B: the pairwise
+#   dissimilarities (and the geographic distances of the pairs) of every group; C, D: the differences between the groups (A - L, P - L, A - P) estimated
+#   with four regressions that add what could explain them: (1) group only, (2) + the differences in sequencing depth and unmapped proportion,
+#   (3) + geographic distance (one slope for all groups), (4) + a distance slope per group (the main model), evaluated at the mean distance of the
+#   pairs in the range common to all groups. All with the cluster-robust standard errors of the main analysis. If a crude difference shrinks
+#   when distance is added, it was a difference in where the pairs are, not in the communities; a difference that survives is real.
+#   tables/overall_dissimilarity_by_group.csv, tables/overall_dissimilarity_contrasts.csv.
 #
 # SUPPLEMENTARY (figS5_latitude_zones.png): the same analysis within the two hemispheres (lat_breaks = 0: southern and northern
 #   hemisphere): every hemisphere has its own matched groups, lines and tests. A group needs min_zone_clusters clusters in it; hemispheres
 #   without enough samples are left out.
 #
 # FIGURE (in <out_folder>)  fig3_distance_decay.png : A, B = Bray-Curtis / Jaccard dissimilarity against distance per group (with the tests);
-#   C, D = UMAP (C: alpine / peri-alpine / lowland; D: continents within the alpine samples).
-# TABLES (in <out_folder>/tables)  model_coefficients.csv, tests.csv, curves.csv, umap_samples.csv, umap_alpine_samples.csv, umap_summary.csv, model_checks.csv,
+#   C = UMAP (alpine / peri-alpine / lowland); D = violin grid of the dissimilarities between alpine regions (continents).
+# TABLES (in <out_folder>/tables)  model_coefficients.csv, tests.csv, curves.csv, umap_samples.csv, umap_summary.csv, region_pair_dissimilarity.csv, overall_dissimilarity_by_group.csv, overall_dissimilarity_contrasts.csv, model_checks.csv,
 #   samples_per_replicate.csv, pair_counts.csv, distance_range_per_group.csv, share_of_pairs_at_dissimilarity_1.csv
 #
 # Input : <data_folder>/sample_data_filtered.tsv (needs perialpine_alpine and cluster_id: rerun prepare_microbeatlas_data if absent)
@@ -109,13 +124,13 @@ CFG <- list(
   zone_names  = c("Southern hemisphere", "Northern hemisphere"),
   min_zone_clusters = 15,       # a group needs at least this many clusters in a zone to be analysed there
   umap_n      = Inf,            # UMAP: this many alpine samples (Inf = all of them) and at most as many peri-alpine and lowland samples (evenly spaced)
-  umap_top_otus = 10000,         # UMAP: the most abundant OTUs used (a dense samples x OTUs matrix: ~9,000 x 5,000 = 0.4 GB)
-  umap_pcs    = 100,             # UMAP: principal components of the Hellinger-transformed data that UMAP works on
+  umap_top_otus = 10000,        # UMAP: the most abundant OTUs used (a dense samples x OTUs matrix: ~14,000 x 10,000 = 1.1 GB)
+  umap_pcs    = 100,            # UMAP: principal components of the Hellinger-transformed data that UMAP works on
   umap_neighbors = 30,          # UMAP: size of the local neighbourhood (larger = more of the global structure, smaller = more detail)
   umap_min_dist = 0.3,          # UMAP: how tightly points may be packed (0 = tight clumps, 1 = spread out)
   umap_threads = 4,             # UMAP: threads
   umap_seed   = 1,              # UMAP: random seed (the embedding is reproducible)
-  umap_continents_own = TRUE,   # panel D: its own UMAP of the alpine samples only (TRUE), or the embedding of C with the other groups in grey (FALSE)
+  region_min_clusters = 5,      # panel D: a continent needs at least this many alpine clusters to be a region of the grid
   points_max  = 40000,          # pairs drawn as points (random subset; the models use all pairs)
   point_alpha = 0.05,
   cols        = c(Lowland = "#7C9885", Perialpine = "#CC79A7", Alpine = "#2B6CB0"),
@@ -338,7 +353,16 @@ alp_umap$continent <- continent_of(alp_umap$lat, alp_umap$lon); peri_umap$contin
 message(sprintf("UMAP samples: %d alpine (%s), %d peri-alpine and %d lowland (evenly spaced over latitude / longitude, at most one per %g m)", nrow(alp_umap),
                 paste(sprintf("%s %d", names(table(alp_umap$continent)), table(alp_umap$continent)), collapse = ", "), nrow(peri_umap), nrow(low_umap), CFG$thin_m))
 
-all_ids <- unique(c(unlist(lapply(analyses, function(a) unlist(lapply(a$sel, `[[`, "id")))), alp_umap$id, peri_umap$id, low_umap$id))
+# Region grid: in every replicate ONE random alpine sample per cluster (ALL clusters), at most one per thin_m metres, with its continent
+region_sets <- lapply(seq_len(CFG$n_rep), function(r) {
+  set.seed(7000 + r)
+  a <- meta[meta$group == "Alpine", ]; a <- a[sample.int(nrow(a)), ]; a <- a[!duplicated(a$cl), ]; a <- a[thin_sites(a$lat, a$lon, CFG$thin_m), ]
+  a$region <- continent_of(a$lat, a$lon); a
+})
+reg_n <- table(region_sets[[1]]$region); reg_keep <- names(reg_n)[reg_n >= CFG$region_min_clusters]
+message(sprintf("Region grid: %d alpine clusters; continents: %s; regions with at least %d clusters: %s", nrow(region_sets[[1]]), paste(sprintf("%s %d", names(reg_n), reg_n), collapse = ", "),
+                CFG$region_min_clusters, if (length(reg_keep)) paste(reg_keep, collapse = ", ") else "none"))
+all_ids <- unique(c(unlist(lapply(analyses, function(a) unlist(lapply(a$sel, `[[`, "id")))), alp_umap$id, peri_umap$id, low_umap$id, unlist(lapply(region_sets, `[[`, "id"))))
 message(length(all_ids), " distinct samples across all analyses and replicates")
 
 to_sparse <- function(m) {
@@ -589,14 +613,14 @@ message("(> 0 for alpine minus lowland = alpine samples MORE dissimilar at the s
 ## ---- 5. UMAP ---------------------------------------------------------------------------------------------------------------------------
 # The relative abundances of the umap_top_otus most abundant OTUs (as in the full community), Hellinger-transformed (square root), centred and
 # reduced to umap_pcs principal components (a partial SVD, RSpectra), then embedded with UMAP (uwot; Euclidean distance on the components; the first
-# two components are the starting layout). No distance matrix between all samples is computed, so it takes about a minute per embedding.
+# two components are the starting layout). No distance matrix between all samples is computed, so it takes a few minutes.
 for (pkg in c("uwot", "RSpectra")) if (!requireNamespace(pkg, quietly = TRUE)) stop("the UMAP needs the R package ", pkg, " (conda: r-", tolower(pkg), "; add it to envs/r_analyses/environment.yml)")
 umap_file <- file.path(out_folder, "umap_result.rds")
 umap_ids <- c(alp_umap$id, peri_umap$id, low_umap$id)
 umap_key <- list(n = length(umap_ids), chars = sum(nchar(umap_ids)), top = CFG$umap_top_otus, pcs = CFG$umap_pcs, nn = CFG$umap_neighbors, md = CFG$umap_min_dist,
-                 seed = CFG$umap_seed, rare = CFG$rare_depth, own = CFG$umap_continents_own, test = TEST_MODE)
-nm <- NULL; nm_alp <- NULL
-if (REUSE_FITS && file.exists(umap_file)) { umap_cached <- readRDS(umap_file); if (identical(umap_cached$key, umap_key)) { nm <- umap_cached$nm; nm_alp <- umap_cached$nm_alp; message("Reusing the saved UMAP: ", umap_file) } }
+                 seed = CFG$umap_seed, rare = CFG$rare_depth, test = TEST_MODE)
+nm <- NULL
+if (REUSE_FITS && file.exists(umap_file)) { umap_cached <- readRDS(umap_file); if (identical(umap_cached$key, umap_key)) { nm <- umap_cached$nm; message("Reusing the saved UMAP: ", umap_file) } }
 if (is.null(nm)) {
   S <- bind_rows(alp_umap, peri_umap, low_umap) %>% filter(id %in% colnames(X_all))
   X <- X_all[, S$id, drop = FALSE]; tot <- Matrix::colSums(X); ok <- tot >= CFG$rare_depth
@@ -604,31 +628,58 @@ if (is.null(nm)) {
   Prel <- X %*% Matrix::Diagonal(x = 1 / tot)
   rs <- Matrix::rowSums(Prel); top <- order(rs, decreasing = TRUE)[seq_len(min(CFG$umap_top_otus, nrow(Prel)))]
   Hraw <- sqrt(as.matrix(Matrix::t(Prel[top, , drop = FALSE])))                           # samples x the most abundant OTUs, Hellinger-transformed
-  embed <- function(Hr) {                                                                  # centre, principal components, UMAP
-    Hc <- sweep(Hr, 2, colMeans(Hr)); kpc <- min(CFG$umap_pcs, ncol(Hc) - 1, nrow(Hc) - 1)
-    sv <- RSpectra::svds(Hc, k = kpc); pcs <- sv$u %*% diag(sv$d, nrow = kpc)
-    uwot::umap(pcs, n_neighbors = min(CFG$umap_neighbors, nrow(pcs) - 1), min_dist = CFG$umap_min_dist, metric = "euclidean",
-               init = pcs[, 1:2], init_sdev = 1e-4, n_threads = CFG$umap_threads, seed = CFG$umap_seed, verbose = FALSE)
-  }
-  message(sprintf("UMAP of all samples: %d samples (%d alpine, %d peri-alpine, %d lowland) x %d OTUs (%.1f%% of all reads), %d principal components",
-                  nrow(Hraw), sum(S$group == "Alpine"), sum(S$group == "Perialpine"), sum(S$group == "Lowland"), ncol(Hraw), 100 * sum(rs[top]) / sum(rs), min(CFG$umap_pcs, ncol(Hraw) - 1, nrow(Hraw) - 1)))
-  emb <- embed(Hraw)
+  kpc <- min(CFG$umap_pcs, ncol(Hraw) - 1, nrow(Hraw) - 1)
+  message(sprintf("UMAP: %d samples (%d alpine, %d peri-alpine, %d lowland) x %d OTUs (%.1f%% of all reads), %d principal components",
+                  nrow(Hraw), sum(S$group == "Alpine"), sum(S$group == "Perialpine"), sum(S$group == "Lowland"), ncol(Hraw), 100 * sum(rs[top]) / sum(rs), kpc))
+  Hc <- sweep(Hraw, 2, colMeans(Hraw)); rm(Hraw)
+  sv <- RSpectra::svds(Hc, k = kpc); pcs <- sv$u %*% diag(sv$d, nrow = kpc); rm(Hc, sv)
+  emb <- uwot::umap(pcs, n_neighbors = min(CFG$umap_neighbors, nrow(pcs) - 1), min_dist = CFG$umap_min_dist, metric = "euclidean",
+                    init = pcs[, 1:2], init_sdev = 1e-4, n_threads = CFG$umap_threads, seed = CFG$umap_seed, verbose = FALSE)
   nm <- data.frame(id = S$id, group = as.character(S$group), continent = S$continent, lon = S$lon, lat = S$lat, UMAP1 = emb[, 1], UMAP2 = emb[, 2])
-  if (isTRUE(CFG$umap_continents_own)) {
-    ia <- which(S$group == "Alpine"); message(sprintf("UMAP of the %d alpine samples only (panel D)", length(ia)))
-    emb_a <- embed(Hraw[ia, , drop = FALSE])
-    nm_alp <- data.frame(id = S$id[ia], group = "Alpine", continent = S$continent[ia], lon = S$lon[ia], lat = S$lat[ia], UMAP1 = emb_a[, 1], UMAP2 = emb_a[, 2])
-  } else nm_alp <- nm[nm$group == "Alpine", ]
-  rm(Hraw)
-  saveRDS(list(key = umap_key, nm = nm, nm_alp = nm_alp), umap_file)
+  saveRDS(list(key = umap_key, nm = nm), umap_file)
 }
 nm$group <- factor(nm$group, levels = CFG$groups)
-cont_levels <- c(intersect(names(CFG$cols_continent), nm_alp$continent), if (any(nm_alp$continent == "Other")) "Other")
-nm_alp$continent <- factor(nm_alp$continent, levels = cont_levels)
 write.csv(nm, out_t("umap_samples.csv"), row.names = FALSE)
-write.csv(nm_alp, out_t("umap_alpine_samples.csv"), row.names = FALSE)
-write.csv(data.frame(panel = c(rep("C: group", nlevels(nm$group)), rep("D: alpine continent", length(cont_levels))), category = c(levels(nm$group), cont_levels),
-                     samples = c(as.integer(table(nm$group)), as.integer(table(nm_alp$continent)[cont_levels]))), out_t("umap_summary.csv"), row.names = FALSE)
+write.csv(data.frame(group = levels(nm$group), samples = as.integer(table(nm$group))), out_t("umap_summary.csv"), row.names = FALSE)
+
+## ---- 5b. Region grid: the dissimilarities of ALL pairs of alpine clusters within and between regions -----------------------------------
+# Per replicate: the Bray-Curtis dissimilarity of every pair of the alpine samples (one per cluster) of the regions kept, from sparse matrices
+region_pairs <- function(S0) {
+  S <- S0 %>% filter(id %in% colnames(X_all), region %in% reg_keep)
+  X <- X_all[, S$id, drop = FALSE]; tot <- Matrix::colSums(X); ok <- tot >= CFG$rare_depth
+  S <- S[ok, ]; X <- X[, ok, drop = FALSE]; tot <- tot[ok]
+  Prel <- X %*% Matrix::Diagonal(x = 1 / tot)
+  ij <- which(upper.tri(matrix(0, nrow(S), nrow(S))), arr.ind = TRUE)
+  bray <- as.numeric(Matrix::colSums(abs(Prel[, ij[, 1], drop = FALSE] - Prel[, ij[, 2], drop = FALSE]))) / 2
+  data.frame(ra = S$region[ij[, 1]], rb = S$region[ij[, 2]], ca = S$cl[ij[, 1]], cb = S$cl[ij[, 2]], bray = bray,
+             geo_km = geosphere::distHaversine(cbind(S$lon[ij[, 1]], S$lat[ij[, 1]]), cbind(S$lon[ij[, 2]], S$lat[ij[, 2]])) / 1000, stringsAsFactors = FALSE)
+}
+rp <- NULL
+if (length(reg_keep) >= 2) {
+  rp_file <- file.path(out_folder, "region_pairs.rds")
+  rp_key <- list(ids = sum(nchar(unlist(lapply(region_sets, `[[`, "id")))), n = CFG$n_rep, keep = reg_keep, rare = CFG$rare_depth, test = TEST_MODE)
+  if (REUSE_FITS && file.exists(rp_file)) { rp_c <- readRDS(rp_file); if (identical(rp_c$key, rp_key)) { rp <- rp_c$rp; message("Reusing the saved region pairs: ", rp_file) } }
+  if (is.null(rp)) {
+    message("Region grid: dissimilarities of all pairs of alpine clusters, ", CFG$n_rep, " replicates")
+    rp <- bind_rows(lapply(seq_along(region_sets), function(r) cbind(region_pairs(region_sets[[r]]), rep_id = r)))
+    saveRDS(list(key = rp_key, rp = rp), rp_file)
+  }
+} else message("Region grid: fewer than 2 regions with at least ", CFG$region_min_clusters, " alpine clusters: panel D is left out")
+grid_cells <- NULL; reg_order <- NULL
+if (!is.null(rp)) {
+  # every pair once, ordered so that region a comes before region b alphabetically (the grid is symmetric)
+  sw <- rp$ra > rp$rb; tmp <- rp$ra[sw]; rp$ra[sw] <- rp$rb[sw]; rp$rb[sw] <- tmp
+  cell_stats <- rp %>% group_by(ra, rb) %>% summarise(n_pairs = n(), n_cluster_pairs = n_distinct(paste(pmin(ca, cb), pmax(ca, cb))), median = median(bray), q25 = quantile(bray, 0.25),
+                                                      q75 = quantile(bray, 0.75), median_km = median(geo_km), .groups = "drop") %>% as.data.frame()
+  write.csv(cell_stats, out_t("region_pair_dissimilarity.csv"), row.names = FALSE)
+  # rows and columns in the order of a hierarchical clustering of the median dissimilarities
+  Mmed <- matrix(NA_real_, length(reg_keep), length(reg_keep), dimnames = list(reg_keep, reg_keep))
+  for (i in seq_len(nrow(cell_stats))) { Mmed[cell_stats$ra[i], cell_stats$rb[i]] <- cell_stats$median[i]; Mmed[cell_stats$rb[i], cell_stats$ra[i]] <- cell_stats$median[i] }
+  Mfill <- Mmed; Mfill[is.na(Mfill)] <- max(Mmed, na.rm = TRUE)
+  reg_order <- reg_keep[if (length(reg_keep) > 2) hclust(as.dist(Mfill), method = "average")$order else seq_along(reg_keep)]
+  message(sprintf("Region grid: %s pairs of %d regions; order after clustering: %s; median dissimilarity from %.3f to %.3f", format(nrow(rp), big.mark = ","), length(reg_keep),
+                  paste(reg_order, collapse = ", "), min(cell_stats$median), max(cell_stats$median)))
+}
 
 ## ---- 6. Figures -----------------------------------------------------------------------------------------------------------------
 x_scale <- scale_x_continuous(breaks = log10(c(1, 10, 100, 1000, 10000)), labels = c("1", "10", "100", "1,000", "10,000"))
@@ -676,16 +727,45 @@ pC <- ggplot(nm, aes(UMAP1, UMAP2, colour = group)) +
   scale_colour_manual(values = CFG$cols, name = NULL, breaks = CFG$groups, labels = c(Lowland = "Lowland", Perialpine = "Peri-alpine", Alpine = "Alpine")) +
   umap_guides + coord_equal() + labs(tag = "C", x = "UMAP 1", y = "UMAP 2") + theme_fig +
   theme(legend.position = "top", legend.text = element_text(size = 9))
-cols_cont <- c(CFG$cols_continent, Other = "grey40")[cont_levels]
-bg <- if (!isTRUE(CFG$umap_continents_own)) nm[nm$group != "Alpine", ] else NULL                    # the other groups in grey when D uses the embedding of C
-pD <- ggplot() +
-  (if (!is.null(bg)) geom_point(data = bg, aes(UMAP1, UMAP2), colour = "grey85", size = pt_size(nrow(nm)), alpha = pt_alpha(nrow(nm)), shape = 16)) +
-  geom_point(data = nm_alp, aes(UMAP1, UMAP2, colour = continent), size = pt_size(nrow(nm_alp)), alpha = pt_alpha(nrow(nm_alp)), shape = 16) +
-  stat_ellipse(data = nm_alp[nm_alp$continent %in% names(which(table(nm_alp$continent) >= 10)), ], aes(UMAP1, UMAP2, colour = continent, group = continent), level = 0.95, type = "norm", linewidth = 0.9) +
-  scale_colour_manual(values = cols_cont, name = NULL, drop = FALSE) +
-  umap_guides + coord_equal() +
-  labs(tag = "D", x = if (isTRUE(CFG$umap_continents_own)) "UMAP 1 (alpine samples only)" else "UMAP 1", y = if (isTRUE(CFG$umap_continents_own)) "UMAP 2 (alpine samples only)" else "UMAP 2") + theme_fig +
-  theme(legend.position = "top", legend.text = element_text(size = 9))
+# D: the grid of violins (lower triangle, diagonal = within a region): one vertical scale for all cells, fill = median dissimilarity (blue = similar,
+# red = dissimilar), rows and columns ordered by the clustering above. Drawn as polygons on a common coordinate system: cell (row i, column j) has its centre
+# at x = j, y = n - i + 1, and the dissimilarity of a violin maps to the height of the cell (same mapping everywhere).
+pD <- NULL
+if (!is.null(rp)) {
+  nR <- length(reg_order); lo <- floor(quantile(rp$bray, 0.005) * 20) / 20; lo <- min(lo, floor(min(cell_stats$q25) * 20) / 20 - 0.05)
+  ymap <- function(v, cy) cy + ((v - lo) / (1 - lo) - 0.5) * 0.9
+  polys <- list(); frames <- list(); meds <- list(); labs_n <- list()
+  for (i in seq_len(nR)) for (j in seq_len(i)) {
+    a <- reg_order[j]; b <- reg_order[i]; ra <- min(a, b); rb <- max(a, b)                      # (a < b alphabetically, as stored)
+    v <- rp$bray[rp$ra == ra & rp$rb == rb]; cx <- j; cy <- nR - i + 1
+    frames[[length(frames) + 1]] <- data.frame(xmin = cx - 0.47, xmax = cx + 0.47, ymin = cy - 0.47, ymax = cy + 0.47)
+    if (length(v) < 5) next
+    dn <- density(v, from = lo, to = 1, n = 100, adjust = 1.3)
+    hw <- 0.45 * dn$y / max(dn$y)                                                               # equal maximum width: the shape, not the number of pairs
+    mv <- median(v)
+    polys[[length(polys) + 1]] <- data.frame(cell = paste(i, j), x = c(cx - hw, rev(cx + hw)), y = c(ymap(dn$x, cy), rev(ymap(dn$x, cy))), median = mv)
+    meds[[length(meds) + 1]] <- data.frame(x = cx - 0.38, xend = cx + 0.38, y = ymap(mv, cy), yend = ymap(mv, cy))
+    labs_n[[length(labs_n) + 1]] <- data.frame(x = cx - 0.44, y = cy - 0.43, label = format(n_distinct(paste(pmin(rp$ca[rp$ra == ra & rp$rb == rb], rp$cb[rp$ra == ra & rp$rb == rb]),
+                                                                                              pmax(rp$ca[rp$ra == ra & rp$rb == rb], rp$cb[rp$ra == ra & rp$rb == rb]))), big.mark = ","))
+  }
+  polys <- bind_rows(polys); frames <- bind_rows(frames); meds <- bind_rows(meds); labs_n <- bind_rows(labs_n)
+  reg_lab <- sprintf("%s (%d)", reg_order, as.integer(reg_n[reg_order]))
+  pD <- ggplot() +
+    geom_rect(data = frames, aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax), fill = "white", colour = "grey80", linewidth = 0.3) +
+    geom_polygon(data = polys, aes(x, y, group = cell, fill = median), colour = "grey25", linewidth = 0.25) +
+    geom_segment(data = meds, aes(x = x, xend = xend, y = y, yend = yend), colour = "black", linewidth = 0.5) +
+    geom_text(data = labs_n, aes(x, y, label = label), hjust = 0, size = 2.2, colour = "grey35") +
+    annotate("text", x = nR + 0.45, y = nR + 0.45, hjust = 1, vjust = 1, size = 2.8, lineheight = 1.1, colour = "grey25",
+             label = sprintf("Each cell: Bray-Curtis dissimilarity of the pairs of\nalpine samples of two regions (diagonal: within a region),\nthe same vertical scale in all cells (%.2f at the bottom,\n1.00 at the top); the bar = the median; the number = the\npairs of clusters. Regions in brackets: alpine clusters.", lo)) +
+    scale_fill_gradientn(colours = c("#2166AC", "#F7F7F7", "#B2182B"), name = "Median Bray-Curtis dissimilarity", limits = range(cell_stats$median),
+                         values = scales::rescale(c(min(cell_stats$median), mean(range(cell_stats$median)), max(cell_stats$median)), from = range(cell_stats$median))) +
+    scale_x_continuous(breaks = seq_len(nR), labels = reg_lab, limits = c(0.5, nR + 0.5), expand = c(0, 0)) +
+    scale_y_continuous(breaks = nR - seq_len(nR) + 1, labels = reg_lab, limits = c(0.5, nR + 0.5), expand = c(0, 0)) +
+    coord_fixed() + labs(tag = "D", x = NULL, y = NULL) + theme_fig +
+    guides(fill = guide_colourbar(title.position = "top", barwidth = unit(3, "in"), barheight = unit(0.13, "in"))) +
+    theme(legend.position = "top", legend.title = element_text(size = 9), legend.text = element_text(size = 8), panel.grid = element_blank(), panel.border = element_blank(),
+          axis.text.x = element_text(angle = 40, hjust = 1, size = 9), axis.text.y = element_text(size = 9), axis.ticks = element_blank())
+}
 
 stat_txt <- paste("Statistics: one linear regression per metric on the pairs of all replicates with a group x distance interaction (distance centred at the reference distance); the stars are the tests of its terms (level at the reference distance and rise per 10-fold distance of A = alpine, P = peri-alpine, L = lowland; A-L = alpine minus lowland), with standard errors that are cluster-robust for pair data (pairs sharing a cluster are dependent; Aronow et al. 2015; the clusters are the independent units); *** p < 0.001, ** p < 0.01, * p < 0.05, ns; not adjusted for multiple tests. All coefficients: tables/model_coefficients.csv.")
 caption <- paste(
@@ -694,10 +774,10 @@ caption <- paste(
           if (CFG$df_dist > 1) sprintf("; natural spline with %d df", CFG$df_dist) else ""),
   sprintf("Each of %d replicates: %d samples per group (one random sample per BioProject / location cluster, at least %g m apart, cut down evenly over %g-degree latitude / longitude cells) and up to %d pairs per group (random within classes of geographic distance); the pairs of all replicates are analysed together.", CFG$n_rep, n_main, CFG$thin_m, CFG$even_cell_deg, CFG$n_pairs),
   stat_txt,
-  sprintf("C: UMAP of the community composition (Hellinger-transformed relative abundances of the %d most abundant OTUs, %d principal components) of %s alpine, %s peri-alpine and %s lowland samples (the non-alpine ones spread evenly over latitude / longitude); D: %s of the %s alpine samples, coloured by continent; ellipses = 95%% of the samples of a category. UMAP keeps neighbourhoods, not distances: the axes, the size of the clusters and the gaps between them are not quantitative.",
-          CFG$umap_top_otus, CFG$umap_pcs, format(sum(nm$group == "Alpine"), big.mark = ","), format(sum(nm$group == "Perialpine"), big.mark = ","), format(sum(nm$group == "Lowland"), big.mark = ","),
-          if (isTRUE(CFG$umap_continents_own)) "a separate UMAP" else "the same UMAP as C", format(nrow(nm_alp), big.mark = ",")))
-assemble_fig(file.path(out_folder, "fig3_distance_decay.png"), list(list(pA, pB), list(pC, pD)), get_legend(pA), caption, width = 14, height = 15.5, row_heights = c(1, 1.2))
+  sprintf("C: UMAP of the community composition (Hellinger-transformed relative abundances of the %d most abundant OTUs, %d principal components) of %s alpine, %s peri-alpine and %s lowland samples (the non-alpine ones spread evenly over latitude / longitude); ellipses = 95%% of the samples of a group. UMAP keeps neighbourhoods, not distances: the axes, the size of the clusters and the gaps between them are not quantitative.",
+          CFG$umap_top_otus, CFG$umap_pcs, format(sum(nm$group == "Alpine"), big.mark = ","), format(sum(nm$group == "Perialpine"), big.mark = ","), format(sum(nm$group == "Lowland"), big.mark = ",")),
+  if (!is.null(pD)) sprintf("D: distributions of the Bray-Curtis dissimilarities of all pairs of alpine clusters within and between regions (continents; %d replicates of one random alpine sample per cluster, pairs pooled): one violin per cell, the same vertical scale in all cells, coloured by the median (red = more dissimilar); rows and columns ordered by hierarchical clustering of the medians. Far-apart regions are more dissimilar anyway (A, B): the median distance of every cell is in tables/region_pair_dissimilarity.csv.", CFG$n_rep))
+assemble_fig(file.path(out_folder, "fig3_distance_decay.png"), list(list(pA, pB), if (!is.null(pD)) list(pC, pD) else list(pC)), get_legend(pA), caption, width = 14, height = 15.5, row_heights = c(1, 1.2))
 saveRDS(list(A = pA, B = pB, C = pC, D = pD), file.path(out_folder, "fig3_panels.rds"))
 
 # Supplementary: the same analysis within the two hemispheres
@@ -716,6 +796,72 @@ if (length(zone_res)) {
                 stat_txt, "A hemisphere in which the alpine group and one more group do not have enough clusters is left out ('not enough samples').")
   assemble_fig(file.path(out_folder, "figS5_latitude_zones.png"), c(zpanels[1], zpanels[2]), zleg, zcap, width = 12, height = 9.5)
 }
+
+## ---- 7. Supplementary: the overall dissimilarity of the groups, crude and adjusted ----------------------------------------------------
+# Does the picture of the distance decay agree with a plain comparison of the dissimilarity of the groups? The pairs of the main analysis (all replicates,
+# all distances); the differences between the groups under four regressions that add, one after the other, what could explain a difference.
+P0 <- main$P; groups0 <- main$groups
+in_common <- P0$geo_km >= main$common[1] & P0$geo_km <= main$common[2]
+m0 <- mean(P0$log10_geo[in_common])                                         # the mean distance of the pairs in the range common to all groups (log10 km)
+model_labels <- c("1  Crude: group only", "2  + sequencing depth, unmapped proportion", "3  + geographic distance (one slope for all)",
+                  sprintf("4  + a distance slope per group (main model), at %s km", fmt_km(10^m0)))
+fmls <- list(~ group, ~ group + d_depth + d_unm, ~ group + d_depth + d_unm + log10_geo, as.formula(sprintf("~ group * I(log10_geo - %s) + d_depth + d_unm", format(m0, digits = 10))))
+contr <- bind_rows(lapply(names(metrics), function(mt) bind_rows(lapply(seq_along(fmls), function(k) {
+  m <- lm(update.formula(fmls[[k]], as.formula(paste(mt, "~ ."))), data = P0)
+  V <- dyadic_vcov(model.matrix(m), resid(m), P0$ca, P0$cb); if (is.null(V)) return(NULL)
+  dfree <- max(attr(V, "G") - 1, 1); b <- coef(m); nm <- names(b)
+  bind_rows(lapply(Filter(function(cp) all(cp %in% groups0), cmp_all), function(cp) {
+    v <- setNames(numeric(length(nm)), nm)
+    if (paste0("group", cp[1]) %in% nm) v[paste0("group", cp[1])] <- 1; if (paste0("group", cp[2]) %in% nm) v[paste0("group", cp[2])] <- -1   # the reference group has no coefficient
+    est <- sum(v * b); se <- sqrt(drop(t(v) %*% V %*% v))
+    data.frame(metric = mt, model_n = k, model = model_labels[k], contrast = paste(short[cp[1]], short[cp[2]], sep = " - "), estimate = est, se = se,
+               lo = est - qt(0.975, dfree) * se, hi = est + qt(0.975, dfree) * se, p = 2 * pt(-abs(est / se), dfree), stringsAsFactors = FALSE)
+  }))
+}))))
+write.csv(contr, out_t("overall_dissimilarity_contrasts.csv"), row.names = FALSE)
+desc <- bind_rows(lapply(names(metrics), function(mt) P0 %>% group_by(group) %>%
+  summarise(metric = mt, n_pairs = n(), n_clusters = n_distinct(c(ca, cb)), mean = mean(.data[[mt]]), median = median(.data[[mt]]), q25 = quantile(.data[[mt]], 0.25), q75 = quantile(.data[[mt]], 0.75),
+            share_at_1 = mean(.data[[mt]] >= 1 - 1e-12), median_km = median(geo_km), .groups = "drop")))
+write.csv(as.data.frame(desc), out_t("overall_dissimilarity_by_group.csv"), row.names = FALSE)
+if (nrow(contr)) {
+  message("\nOverall dissimilarity of the groups, Bray-Curtis: difference between groups (estimate [95% CI]) as the regressions add depth / unmapped, distance, and a slope per group:")
+  for (cn in unique(contr$contrast)) {
+    d <- contr[contr$metric == "bray" & contr$contrast == cn, ]
+    message(sprintf("  %s : %s", cn, paste(sprintf("(%d) %s [%s, %s]%s", d$model_n, fmt(d$estimate), fmt(d$lo), fmt(d$hi), stars(d$p)), collapse = "   ")))
+  }
+}
+
+long_d <- bind_rows(lapply(names(metrics), function(mt) data.frame(group = P0$group, metric = metrics[[mt]], y = P0[[mt]])))
+ylo_d <- max(0, floor(quantile(long_d$y, 0.01) * 20) / 20)
+grp_lab <- c(Lowland = "Lowland", Perialpine = "Peri-alpine", Alpine = "Alpine")
+violin_box <- list(geom_violin(scale = "width", colour = "grey30", linewidth = 0.3, alpha = 0.85), geom_boxplot(width = 0.12, outlier.shape = NA, fill = "white", linewidth = 0.3),
+                   scale_fill_manual(values = CFG$cols, guide = "none"), scale_x_discrete(labels = grp_lab))
+pS1 <- ggplot(long_d, aes(group, y, fill = group)) + violin_box +
+  stat_summary(fun = mean, geom = "point", shape = 23, size = 2.4, fill = "white", colour = "black") +
+  facet_wrap(~ metric, nrow = 1) + coord_cartesian(ylim = c(ylo_d, 1)) + labs(tag = "A", x = NULL, y = "Dissimilarity of pairs of samples") + theme_fig
+pS2 <- ggplot(P0, aes(group, log10_geo, fill = group)) +
+  annotate("rect", xmin = -Inf, xmax = Inf, ymin = log10(main$common[1]), ymax = log10(main$common[2]), fill = "black", alpha = 0.07) + violin_box +
+  annotate("label", x = 0.55, y = log10(main$common[2]), label = "range common to all groups", hjust = 0, vjust = -0.2, size = 2.8, colour = "grey25", fill = "white", alpha = 0.8, linewidth = 0) +
+  scale_y_continuous(breaks = log10(c(1, 10, 100, 1000, 10000)), labels = c("1", "10", "100", "1,000", "10,000")) +
+  labs(tag = "B", x = NULL, y = "Geographic distance of the pairs (km)") + theme_fig
+cols_contrast <- c("A - L" = "#2B6CB0", "P - L" = "#CC79A7", "A - P" = "#6A51A3")
+forest <- function(mt, tag, ttl) {
+  d <- contr[contr$metric == mt, ]; d$model <- factor(d$model, levels = rev(model_labels)); d$contrast <- factor(d$contrast, levels = names(cols_contrast))
+  ggplot(d, aes(estimate, model, colour = contrast)) +
+    geom_vline(xintercept = 0, linetype = "dashed", colour = "grey50") +
+    geom_linerange(aes(xmin = lo, xmax = hi), position = position_dodge(width = 0.65), linewidth = 0.7) +
+    geom_point(position = position_dodge(width = 0.65), size = 2.2) +
+    geom_text(aes(x = hi, label = stars(p)), position = position_dodge(width = 0.65), hjust = -0.25, vjust = 0.4, size = 2.6, show.legend = FALSE) +
+    scale_colour_manual(values = cols_contrast, name = NULL, labels = c("A - L" = "Alpine - lowland", "P - L" = "Peri-alpine - lowland", "A - P" = "Alpine - peri-alpine")) +
+    scale_y_discrete(labels = scales::label_wrap(30)) + scale_x_continuous(expand = expansion(mult = c(0.05, 0.12))) +
+    labs(tag = tag, title = ttl, x = "Difference in dissimilarity (estimate and 95% interval)", y = NULL) + theme_fig +
+    theme(plot.title = element_text(size = 10, face = "bold"), legend.position = "none")        # one legend for the figure, on top
+}
+pS3 <- forest("bray", "C", "Bray-Curtis"); pS4 <- forest("jaccard", "D", "Jaccard (rarefied)")
+s6cap <- paste("Supplementary Figure 6. The overall dissimilarity of alpine, peri-alpine and lowland soils, crude and adjusted.",
+               sprintf("A: dissimilarity of the pairs of samples of each group (all replicates and distances; violin, box = quartiles, diamond = mean; %s pairs). B: the geographic distance of the same pairs (shaded: the range common to all groups): the groups do not cover the same distances, so the crude comparison in A mixes differences in the communities with differences in where the pairs are.", format(nrow(P0), big.mark = ",")),
+               "C, D: differences between the groups (A = alpine, P = peri-alpine, L = lowland) estimated by four linear regressions that add, one after the other, the differences in sequencing depth and unmapped proportion, the geographic distance (log10), and a distance slope per group (the main model of Figure 3, evaluated at the mean distance of the pairs in the common range); points = estimates, bars = 95% intervals, standard errors cluster-robust for pair data (pairs sharing a cluster are dependent; the clusters are the independent units); *** p < 0.001, ** p < 0.01, * p < 0.05, ns; not adjusted for multiple tests. A difference that shrinks towards 0 when distance is added reflects where the pairs are, not the communities.")
+assemble_fig(file.path(out_folder, "figS6_overall_dissimilarity.png"), list(list(pS1, pS2), list(pS3, pS4)), get_legend(pS3 + theme(legend.position = "top")), s6cap, width = 13, height = 11.5)
 
 message("Done. Outputs in ", out_folder)
 writeLines(capture.output(sessionInfo()), file.path(out_folder, "sessionInfo.txt"))
