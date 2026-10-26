@@ -1209,14 +1209,15 @@ net_nodes$continent <- ifelse(net_nodes$main, unname(range_continent[net_nodes$r
 tint_of <- function(cn) { ends <- CFG$cols_continent_shades[[if (cn %in% names(CFG$cols_continent_shades)) cn else "Other"]]; colorRampPalette(c(ends[2], "white"))(10)[5] }      # a pale tint of the continent's colour
 net_nodes$col <- ifelse(net_nodes$main, unname(range_cols[net_nodes$region]), vapply(net_nodes$continent, tint_of, ""))
 net_nodes$named <- net_nodes$main | net_nodes$n >= CFG$net_name_min_clusters
-net_panel_in <- c(7.4, 5.8)                                                                # the panel of the network in inches (width, height): the scale of the node sizes
+net_panel_in <- c(9.9, 7.0)                                                                # the panel of the network in inches (width, height): the scale of the node sizes and names
+net_node_mm <- 13                                                                          # diameter of the largest node in mm
 # Moves nodes apart where they overlap or are crowded, and pulls them gently back to where the MDS put them (so the layout keeps its structure): the radius of a node is
 # in mm (the dot, plus room for the name of the named ones)
 declump <- function(xy, n, named, panel_in = net_panel_in, iters = 400, pad = 1.5, pull = 0.04) {
   K <- nrow(xy); if (K < 2) return(xy)
-  R <- 5.5 * sqrt(n / max(n)) + ifelse(named, 3, 0)
+  R <- (net_node_mm / 2) * sqrt(n / max(n)) + ifelse(named, 3, 0)
   cx <- mean(range(xy[, 1])); cy <- mean(range(xy[, 2]))
-  sx <- 0.82 * panel_in[1] * 25.4 / max(diff(range(xy[, 1])), 1e-9); sy <- 0.82 * panel_in[2] * 25.4 / max(diff(range(xy[, 2])), 1e-9)
+  sx <- 0.88 * panel_in[1] * 25.4 / max(diff(range(xy[, 1])), 1e-9); sy <- 0.88 * panel_in[2] * 25.4 / max(diff(range(xy[, 2])), 1e-9)
   P0 <- cbind((xy[, 1] - cx) * sx, (xy[, 2] - cy) * sy); P <- P0
   for (it in seq_len(iters)) {
     for (i in seq_len(K - 1)) for (j in (i + 1):K) {
@@ -1248,7 +1249,7 @@ net_layout <- function(value_col, ref = NULL) {
 # Names without overlaps: for every node (large ones first) the first free position among eight directions and growing distances (a free position does not overlap a name
 # already placed, any node or the edge of the panel); estimated text size in mm; ux, uy = plot units per mm of the panel. Returns the anchor and the alignment of every name.
 place_labels <- function(pts, names_to_place, bx, by, ux, uy, txt_scale = NULL, blocked = NULL) {
-  X <- pts$x / ux; Y <- pts$y / uy; R <- 5.5 * sqrt(pts$n / max(pts$n))                      # nodes in mm (max_size 11 = diameter)
+  X <- pts$x / ux; Y <- pts$y / uy; R <- (net_node_mm / 2) * sqrt(pts$n / max(pts$n))             # nodes in mm (net_node_mm = the diameter of the largest)
   box <- c(bx[1] / ux, bx[2] / ux, by[1] / uy, by[2] / uy)
   dirs <- list(c(0, 1, 0.5, 0), c(0, -1, 0.5, 1), c(1, 0, 0, 0.5), c(-1, 0, 1, 0.5), c(0.7, 0.7, 0, 0), c(-0.7, 0.7, 1, 0), c(0.7, -0.7, 0, 1), c(-0.7, -0.7, 1, 1))
   placed <- matrix(numeric(0), 0, 4); out <- list()
@@ -1298,7 +1299,7 @@ net_inset_plot <- function(R) {
 }
 net_plot <- function(L, tag, legend_title, panel_in = net_panel_in, inset = NULL) {
   nodes <- L$nodes[order(-L$nodes$n), ]; e <- L$edges
-  pad <- 0.16; rx <- range(nodes$x); ry <- range(nodes$y); bx <- rx + c(-1, 1) * pad * diff(rx); by <- ry + c(-1, 1) * pad * diff(ry)
+  pad <- 0.12; rx <- range(nodes$x); ry <- range(nodes$y); bx <- rx + c(-1, 1) * pad * diff(rx); by <- ry + c(-1, 1) * pad * diff(ry)
   # the inset: in the corner with the fewest nodes and edges; if every corner has a node, room is made at the top
   ins <- if (isTRUE(CFG$net_inset) && !is.null(inset)) net_reg(inset) else NULL
   ins_layer <- NULL; blocked <- NULL
@@ -1324,7 +1325,7 @@ net_plot <- function(L, tag, legend_title, panel_in = net_panel_in, inset = NULL
     geom_text(data = lab[lab$main, ], aes(ax, ay, label = region, hjust = hj, vjust = vj), size = 3.3, fontface = "bold") +
     scale_fill_identity() +
     (if (!is.null(ins_layer)) ins_layer) +
-    scale_size_area(max_size = 11, name = "Alpine clusters\nin the range", labels = scales::comma) +
+    scale_size_area(max_size = net_node_mm, name = "Alpine clusters\nin the range", labels = scales::comma) +
     scale_colour_gradientn(colours = c("#2C7BB6", "#FFFFBF", "#D7191C"), name = legend_title, limits = range(e$value)) +
     guides(colour = guide_colourbar(title.position = "top", barwidth = unit(0.2, "in"), barheight = unit(2.4, "in")), size = guide_legend(title.position = "top", ncol = 1)) +
     scale_x_continuous(limits = bx, expand = c(0, 0)) + scale_y_continuous(limits = by, expand = c(0, 0)) +
@@ -1363,8 +1364,8 @@ caption <- paste(
   if (nzchar(excl_txt)) excl_txt,
   if (!is.null(pD)) sprintf("D: network of the mountain ranges (%s; %d ranges; colours as in C for the %d main ranges, named in bold; the other ranges are pale tints of the colour of their continent and are named if they have at least 3 clusters; size of a node = number of alpine clusters). The nodes are placed by classical multidimensional scaling of the median Bray-Curtis dissimilarity of all pairs of alpine clusters of two ranges (%d replicates of one random alpine sample per cluster; every pair of clusters has one value, the mean over the replicates, so that every cluster counts equally), adjusted to the median differences in sequencing depth and unmapped proportion but NOT for geographic distance: ranges with similar communities lie close together, distance included (the two axes show %.0f%% of the variation; the dissimilarities are first reduced by a common floor so that their differences, not their common level, place the nodes, and nodes that overlap are moved slightly apart). Edges: every range linked to its %d most similar ranges and the minimum spanning tree, coloured by the median dissimilarity. Supplementary Figure 7 also shows the dissimilarity at the same geographic distance. Inset (placed where there is room): the median dissimilarity of every pair of ranges (with at least 5 pairs of clusters) against the median distance of their clusters, with the regression line and its 95%% interval; standard errors cluster-robust for pairs of ranges (a range is in many pairs; tables/range_distance_regression.csv).", region_kind, length(reg_all), length(top_ranges), CFG$n_rep, 100 * L_main$share, CFG$net_k))
 rows3 <- list(list(pA, pB), list(pC, pC_leg)); if (!is.null(pD)) rows3[[3]] <- list(pD, pD_leg)
-assemble_fig(file.path(out_folder, "fig3_distance_decay.png"), rows3, get_legend(pA), caption, width = 14, height = if (is.null(pD)) 17 else 23.5, row_heights = c(1, 1.7, 1.3)[seq_along(rows3)],
-             row_widths = list(NULL, c(2, 1), c(1.5, 1)))
+assemble_fig(file.path(out_folder, "fig3_distance_decay.png"), rows3, get_legend(pA), caption, width = 14, height = if (is.null(pD)) 17 else 25, row_heights = c(1, 1.7, 1.7)[seq_along(rows3)],
+             row_widths = list(NULL, c(2, 1), c(3, 1)))
 saveRDS(list(A = pA, B = pB, C = pC, D = pD), file.path(out_folder, "fig3_panels.rds"))
 
 # Supplementary 7: the network of the ranges without and with the adjustment for geographic distance (the layout of B rotated onto that of A)
@@ -1376,7 +1377,7 @@ if (!is.null(L_main)) {
                 "The nodes are placed by classical multidimensional scaling of the median Bray-Curtis dissimilarity of all pairs of alpine clusters of two ranges (replicates of one random alpine sample per cluster; every pair of clusters has one value, the mean over the replicates), edges link every range to its most similar ranges (and the minimum spanning tree), coloured by the median dissimilarity. In both panels the dissimilarity is adjusted to the median differences in sequencing depth and unmapped proportion; in B also to the median geographic distance of the pairs (a common slope of the dissimilarity on log10 distance, estimated within pairs of ranges), so B shows how different the ranges are at the same distance; its layout is rotated and scaled onto that of A to make the two comparable. Compare the two: ranges that are far apart in A and close together in B are far apart in space rather than different. Insets: the median dissimilarity of every pair of ranges against the distance between them with the regression line (cluster-robust standard errors for pairs of ranges); in B the slope should be near zero if the adjustment has removed the effect of distance.",
                 sprintf("The two axes show %.0f%% (A) and %.0f%% (B) of the variation. The numbers (raw and adjusted medians, median distance, number of pairs of clusters) are in tables/range_pair_dissimilarity.csv.", 100 * L_main$share, 100 * L_sp$share),
                 if (nzchar(excl_txt)) excl_txt)
-  assemble_fig(file.path(out_folder, "figS7_range_dissimilarity_space.png"), list(list(pS7a, leg_cell(pS7a)), list(pS7b, leg_cell(pS7b))), NULL, cap7, width = 14, height = 14.5, row_heights = c(1, 1), row_widths = list(c(1.5, 1), c(1.5, 1)))
+  assemble_fig(file.path(out_folder, "figS7_range_dissimilarity_space.png"), list(list(pS7a, leg_cell(pS7a)), list(pS7b, leg_cell(pS7b))), NULL, cap7, width = 14, height = 19, row_heights = c(1, 1), row_widths = list(c(3, 1), c(3, 1)))
 }
 # Supplementary 8: the distributions behind the medians, a grid of violins (the top ranges)
 if (!is.null(pG)) {
