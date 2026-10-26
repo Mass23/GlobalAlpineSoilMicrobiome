@@ -73,7 +73,7 @@
 #   CONTINENTS of the alpine samples (rule-based boxes of latitude / longitude in continent_of()).
 #
 # RANGE NETWORK (panel D): a network of the mountain ranges. Nodes: all ranges with at least net_min_clusters alpine clusters (and the coloured ones); colour as in C
-#   (the other ranges dark grey), size = number of alpine CLUSTERS; only the coloured ranges are named. The distance between two ranges is the MEDIAN
+#   (the other ranges a pale tint of the colour family of their continent), size = number of alpine CLUSTERS; the coloured main ranges are named in bold, the other ranges with at least net_name_min_clusters clusters in a smaller type. The distance between two ranges is the MEDIAN
 #   dissimilarity of all pairs of alpine clusters of the two ranges: in each of n_rep replicates ONE random alpine sample per cluster is taken (a different
 #   one every time) and the Bray-Curtis dissimilarity of ALL pairs of these samples is computed. Every pair of clusters then gets ONE value, the mean over the
 #   replicates (so that every pair of clusters, and with it every cluster, counts equally, however often it was drawn and however many samples it has), and
@@ -88,6 +88,12 @@
 #   coloured ranges as a grid of violins of the values of the pairs of clusters (cells with fewer than 5 pairs show the values themselves; one scale for all cells, stretched near 1: region_axis; rows and columns ordered by hierarchical clustering of the
 #   medians). Ranges with fewer than region_warn_clusters clusters are marked with a dagger there: their distributions rest on few cluster pairs, and a
 #   range with 2 clusters on ONE within-range pair: interpret with care.
+#
+# EXCLUDED RANGES (range_exclude, by the name in the GMBA column DBaseName; by default Sierra Nevada (USA), whose distributions of dissimilarities look atypical in the violins
+#   of S8): left out of the comparison of ranges: the medians, the colour scale and the order of the grid, the network (Figure 3D, S7) and the coloured ranges of the UMAP (its
+#   samples are an uncoloured range there). They stay in the alpine group of the distance decay (A, B). The adjustments for sequencing depth and unmapped proportion are
+#   estimated without them, so that they cannot pull the common coefficients. In S8 they are drawn in grey at the end of the grid, labelled "excluded", as the reason why. The
+#   log lists the exclusions and, if a name is not found, the ranges with a similar name.
 #
 # SUPPLEMENTARY (figS5_latitude_zones.png): the same analysis within the two hemispheres (lat_breaks = 0: southern and northern
 #   hemisphere): every hemisphere has its own matched groups, lines and tests. A group needs min_zone_clusters clusters in it; hemispheres
@@ -172,8 +178,10 @@ CFG <- list(
   range_level = NA,             # panels C, D: which GMBA polygons are the ranges: NA = the 292 of the column Select_300 (made for global comparisons); a number 1-10 = all of that Hier_Lvl
   net_min_clusters = 2,         # panel D: a range needs at least this many alpine clusters to be a node of the network (the coloured ranges are always nodes)
   net_stretch = 0.9,            # panel D: the dissimilarities between ranges are reduced by this share of the smallest one before the MDS (they lie in a narrow band, so the layout would be a blob); 0 = none
+  net_name_min_clusters = 3,    # panel D: ranges with at least this many alpine clusters are named (the coloured main ranges always, in bold)
   net_k       = 3,              # panel D: every range is linked to its this many most similar ranges (plus the minimum spanning tree)
   range_max_km = 50,            # panels C, D: an alpine sample outside every polygon is given to the nearest one if it is closer than this (km); otherwise it is left out
+  range_exclude = c("Sierra Nevada (USA)"),   # ranges left out of the comparison of ranges (the medians, the network, S7): their distributions of dissimilarities are atypical (see the violins of S8, where they are shown in grey)
   region_warn_clusters = 5,     # S8: ranges with fewer alpine clusters are marked with a dagger (interpret with care)
   region_axis = "log1m",        # S8: vertical scale of the violins: "log1m" = stretched near 1 (-log10(1 - d + region_eps)), or "linear"
   region_eps  = 0.01,           # S8: the smaller, the more the scale is stretched near 1 (a dissimilarity of exactly 1 is shown at -log10(eps))
@@ -453,10 +461,17 @@ alp_umap <- umap_pick(meta[meta$group == "Alpine", ], n_umap, thin = FALSE)
 low_umap <- umap_pick(meta[meta$group == "Lowland", ], n_umap)
 # the mountain range of every alpine sample; the n_top_ranges ranges with the most samples get a colour (UMAP, map), the others are "Other ranges"
 alp_umap$region <- region_of(alp_umap$lon, alp_umap$lat)
-range_n <- sort(table(alp_umap$region[alp_umap$region != "Other"]), decreasing = TRUE)
+excl_found <- intersect(CFG$range_exclude, unique(alp_umap$region))                           # ranges left out of the comparison of ranges
+for (ex in CFG$range_exclude) {
+  if (ex %in% excl_found) message(sprintf("  range left out of the comparison of ranges: %s (%d alpine samples, %d clusters); it stays in the alpine group, is an uncoloured range in the UMAP and is grey in Supplementary Figure 8",
+                                          ex, sum(alp_umap$region == ex), length(unique(alp_umap$cl[alp_umap$region == ex]))))
+  else { similar <- grep(sub("[ (].*$", "", ex), unique(alp_umap$region), value = TRUE, ignore.case = TRUE)
+         message("  range_exclude: no alpine sample in the range '", ex, "'", if (length(similar)) paste0(" (ranges with a similar name: ", paste(similar, collapse = ", "), ")") else "") }
+}
+range_n <- sort(table(alp_umap$region[alp_umap$region != "Other" & !(alp_umap$region %in% CFG$range_exclude)]), decreasing = TRUE)
 top_ranges <- names(range_n)[seq_len(min(CFG$n_top_ranges, length(range_n)))]
 # the continent of every range (the continent of the centre of its samples)
-cen <- alp_umap[alp_umap$region != "Other", ] %>% group_by(region) %>% summarise(lon = mean(lon), lat = mean(lat), .groups = "drop") %>% as.data.frame()
+cen <- alp_umap[alp_umap$region != "Other" & !(alp_umap$region %in% CFG$range_exclude), ] %>% group_by(region) %>% summarise(lon = mean(lon), lat = mean(lat), .groups = "drop") %>% as.data.frame()
 cen$continent <- continent_of(cen$lat, cen$lon); cen$n <- as.integer(range_n[cen$region])
 # ... plus the largest range of every continent that is not in yet, if it has enough samples
 if (isTRUE(CFG$range_each_continent) && length(range_n)) {
@@ -490,7 +505,9 @@ region_sets <- lapply(seq_len(CFG$n_rep), function(r) {
 reg_n <- table(region_sets[[1]]$region)                                                    # alpine clusters per range
 reg_keep <- top_ranges[top_ranges %in% names(reg_n)]                                       # the ranges compared: the top ranges
 reg_warn <- reg_keep[reg_n[reg_keep] < CFG$region_warn_clusters]
-reg_all <- unique(c(reg_keep, setdiff(names(reg_n)[reg_n >= CFG$net_min_clusters], "Other")))                # the nodes of the network: the coloured ranges and the others with enough clusters
+reg_excl <- intersect(CFG$range_exclude, names(reg_n)); reg_pair_set <- NULL                      # the excluded ranges are still in the pairs (for S8) but not in the comparison
+reg_all <- unique(c(reg_keep, setdiff(names(reg_n)[reg_n >= CFG$net_min_clusters], c("Other", CFG$range_exclude))))                # the nodes of the network: the coloured ranges and the others with enough clusters
+reg_pair_set <- c(reg_all, reg_excl)
 message(sprintf("Range comparison: %d alpine clusters; the top ranges and their clusters: %s", nrow(region_sets[[1]]), if (length(reg_keep)) paste(sprintf("%s (%d)", reg_keep, reg_n[reg_keep]), collapse = ", ") else "none"))
 all_ids <- unique(c(unlist(lapply(analyses, function(a) unlist(lapply(a$sel, `[[`, "id")))), alp_umap$id, low_umap$id, unlist(lapply(region_sets, `[[`, "id"))))
 message(length(all_ids), " distinct samples across all analyses and replicates")
@@ -807,7 +824,7 @@ write.csv(data.frame(category = names(table(nm$range_class)), samples = as.integ
 ## ---- 5b. Region grid: the dissimilarities of ALL pairs of alpine clusters within and between regions -----------------------------------
 # Per replicate: the Bray-Curtis dissimilarity of every pair of the alpine samples (one per cluster) of the regions kept, from sparse matrices
 region_pairs <- function(S0) {
-  S <- S0 %>% filter(id %in% colnames(X_all), region %in% reg_all)
+  S <- S0 %>% filter(id %in% colnames(X_all), region %in% reg_pair_set)
   X <- X_all[, S$id, drop = FALSE]; tot <- Matrix::colSums(X); ok <- tot >= CFG$rare_depth
   S <- S[ok, ]; X <- X[, ok, drop = FALSE]; tot <- tot[ok]
   Prel <- X %*% Matrix::Diagonal(x = 1 / tot)
@@ -820,7 +837,7 @@ region_pairs <- function(S0) {
 rp <- NULL
 if (length(reg_all) >= 2) {
   rp_file <- file.path(out_folder, "region_pairs.rds")
-  rp_key <- list(ids = sum(nchar(unlist(lapply(region_sets, `[[`, "id")))), n = CFG$n_rep, keep = reg_all, src = region_kind, rare = CFG$rare_depth, test = TEST_MODE, v = 3)
+  rp_key <- list(ids = sum(nchar(unlist(lapply(region_sets, `[[`, "id")))), n = CFG$n_rep, keep = reg_pair_set, src = region_kind, rare = CFG$rare_depth, test = TEST_MODE, v = 3)
   if (REUSE_FITS && file.exists(rp_file)) { rp_c <- readRDS(rp_file); if (identical(rp_c$key, rp_key)) { rp <- rp_c$rp; message("Reusing the saved region pairs: ", rp_file) } }
   if (is.null(rp)) {
     message("Region grid: dissimilarities of all pairs of alpine clusters, ", CFG$n_rep, " replicates")
@@ -839,12 +856,13 @@ if (!is.null(rp)) {
   rp$cpkey <- paste(pmin(rp$ca, rp$cb), pmax(rp$ca, rp$cb), sep = "|")
   cp <- rp %>% group_by(ra, rb, cpkey) %>% summarise(ca = first(ca), cb = first(cb), bray = mean(bray), d_depth = mean(d_depth), d_unm = mean(d_unm), geo_km = mean(geo_km), n_rep = n(), .groups = "drop") %>% as.data.frame()
   cp$cell <- paste(cp$ra, cp$rb, sep = " | "); cp$log10_geo <- log10(pmax(cp$geo_km, 0.1))
+  fit_rows <- !(cp$ra %in% reg_excl | cp$rb %in% reg_excl)                                        # the excluded ranges do not take part in estimating the adjustment
   adjust_pairs <- function(with_space) {
     dm <- function(x) x - ave(x, cp$cell)
     X <- cbind(d_depth = dm(cp$d_depth), d_unm = dm(cp$d_unm)); if (with_space) X <- cbind(X, log10_geo = dm(cp$log10_geo))
-    b <- qr.solve(X, dm(cp$bray))
-    y <- cp$bray - b["d_depth"] * (cp$d_depth - median(cp$d_depth)) - b["d_unm"] * (cp$d_unm - median(cp$d_unm))
-    if (with_space) y <- y - b["log10_geo"] * (cp$log10_geo - median(cp$log10_geo))
+    b <- qr.solve(X[fit_rows, , drop = FALSE], dm(cp$bray)[fit_rows])
+    y <- cp$bray - b["d_depth"] * (cp$d_depth - median(cp$d_depth[fit_rows])) - b["d_unm"] * (cp$d_unm - median(cp$d_unm[fit_rows]))
+    if (with_space) y <- y - b["log10_geo"] * (cp$log10_geo - median(cp$log10_geo[fit_rows]))
     clip01(y)
   }
   cp$bray_adj <- adjust_pairs(FALSE); cp$bray_adj_space <- adjust_pairs(TRUE)
@@ -950,6 +968,8 @@ u1 <- sim_tab[sim_tab$space == "umap2d", ]; u2 <- spread_tab[spread_tab$space ==
 umap_note <- paste0("Samples of different clusters, mean distance: alpine ", signif(u1$mean_alpine[1], 3), ", lowland ", signif(u1$mean_lowland[1], 3), "\n",
                     "alpine - lowland ", fmt(u1$estimate[1]), " [", fmt(u1$lo[1]), ", ", fmt(u1$hi[1]), "], p ", pfmt(u1$p[1]), ";  same geographic distance: ", fmt(u1$estimate[2]), " [", fmt(u1$lo[2]), ", ", fmt(u1$hi[2]), "], p ", pfmt(u1$p[2]), "\n",
                     "Spread of the cluster centres, alpine / lowland: ", sprintf("%.2f [%.2f, %.2f]", ud$estimate, ud$lo, ud$hi), ";  of the samples within a cluster: ", sprintf("%.2f [%.2f, %.2f]", uw$estimate, uw$lo, uw$hi))
+excl_txt <- if (length(excl_found)) sprintf("%s %s left out of the comparison of ranges (the medians and the network of D and Supplementary Figure 7) because its distributions of dissimilarities are atypical (shown in grey at the end of the grid of Supplementary Figure 8); its samples stay in the alpine group of A and B and are drawn as an uncoloured range in C.",
+                                            paste(excl_found, collapse = ", "), if (length(excl_found) > 1) "are" else "is") else ""
 umap_cap <- sprintf("Text in C: the mean distance in the UMAP between two samples of different clusters (one random sample per cluster, %d replicates, %s pairs), the difference alpine - lowland (negative: alpine samples closer together) with its 95%% interval, estimated with standard errors that are cluster-robust for pair data and also at the same geographic distance, and the ratio alpine / lowland of the spread of the cluster centres (distance to their centre) and of the samples within their clusters, with 95%% intervals from a bootstrap of the clusters. The UMAP axes are not metric: the same tests in the space the UMAP was made from are in Supplementary Figure 9 and tables/umap_similarity_test.csv, umap_spread.csv.",
                     CFG$umap_test_rep, format(nrow(UP), big.mark = ","))
 
@@ -1058,7 +1078,7 @@ pC_leg <- ggplot(LG) +
 # in every cell); the dissimilarity values are the ticks at the left of every row, with a light guide line in every cell.
 pG <- NULL
 if (!is.null(rp) && length(reg_keep) >= 2) {
-  nR <- length(reg_order); lo <- floor(quantile(cp$bray, 0.005) * 20) / 20; lo <- min(lo, floor(min(cell_stats_top$q25) * 20) / 20 - 0.05)
+  reg_show <- c(reg_order, reg_excl); nR <- length(reg_show); lo <- floor(quantile(cp$bray, 0.005) * 20) / 20; lo <- min(lo, floor(min(cell_stats_top$q25) * 20) / 20 - 0.05)
   use_log <- identical(CFG$region_axis, "log1m")
   tr <- if (use_log) function(d) -log10(pmax(1 - d, 0) + CFG$region_eps) else function(d) d
   u_lo <- tr(lo); u_hi <- tr(1)
@@ -1071,7 +1091,7 @@ if (!is.null(rp) && length(reg_keep) >= 2) {
   tick_lab <- ifelse(tick_vals == 1, "1", ifelse(abs(tick_vals * 10 - round(tick_vals * 10)) < 1e-9, sprintf("%.1f", tick_vals), sprintf("%.2f", tick_vals)))
   polys <- list(); frames <- list(); meds <- list(); labs_n <- list(); guides_l <- list(); dots <- list()
   for (i in seq_len(nR)) for (j in seq_len(i)) {
-    a <- reg_order[j]; b <- reg_order[i]; ra <- min(a, b); rb <- max(a, b)                      # (a < b alphabetically, as stored)
+    a <- reg_show[j]; b <- reg_show[i]; ra <- min(a, b); rb <- max(a, b); excl <- a %in% reg_excl || b %in% reg_excl      # (a < b alphabetically, as stored)
     v <- cp$bray[cp$ra == ra & cp$rb == rb]; cx <- j; cy <- nR - i + 1                         # one value per pair of clusters
     frames[[length(frames) + 1]] <- data.frame(xmin = cx - 0.47, xmax = cx + 0.47, ymin = cy - 0.47, ymax = cy + 0.47)
     guides_l[[length(guides_l) + 1]] <- data.frame(x = cx - 0.47, xend = cx + 0.47, y = ymap(tr(tick_vals), cy))
@@ -1080,22 +1100,25 @@ if (!is.null(rp) && length(reg_keep) >= 2) {
     meds[[length(meds) + 1]] <- data.frame(x = cx - 0.38, xend = cx + 0.38, y = ymap(tr(mv), cy), yend = ymap(tr(mv), cy))
     labs_n[[length(labs_n) + 1]] <- data.frame(x = cx - 0.44, y = cy - 0.43, label = format(length(v), big.mark = ","))
     if (length(v) < 5) {                                                                        # too few pairs of clusters for a violin: the values themselves
-      dots[[length(dots) + 1]] <- data.frame(x = cx + seq(-0.2, 0.2, length.out = max(length(v), 2))[seq_along(v)], y = ymap(tr(v), cy), median = mv); next
+      dots[[length(dots) + 1]] <- data.frame(x = cx + seq(-0.2, 0.2, length.out = max(length(v), 2))[seq_along(v)], y = ymap(tr(v), cy), median = mv, excl = excl); next
     }
     dn <- density(tr(v), from = u_lo, to = u_hi, n = 100, adjust = 1.3)                         # the density on the stretched scale
     hw <- 0.45 * dn$y / max(dn$y)                                                               # equal maximum width: the shape, not the number of pairs
-    polys[[length(polys) + 1]] <- data.frame(cell = paste(i, j), x = c(cx - hw, rev(cx + hw)), y = c(ymap(dn$x, cy), rev(ymap(dn$x, cy))), median = mv)
+    polys[[length(polys) + 1]] <- data.frame(cell = paste(i, j), x = c(cx - hw, rev(cx + hw)), y = c(ymap(dn$x, cy), rev(ymap(dn$x, cy))), median = mv, excl = excl)
   }
   polys <- bind_rows(polys); frames <- bind_rows(frames); meds <- bind_rows(meds); labs_n <- bind_rows(labs_n); guides_l <- bind_rows(guides_l); dots <- bind_rows(dots)
   ticks <- bind_rows(lapply(seq_len(nR), function(i) data.frame(y = ymap(tr(tick_vals), nR - i + 1), label = tick_lab)))     # the values at the left of every row
-  reg_lab <- sprintf("%s (%d)%s", reg_order, as.integer(reg_n[reg_order]), ifelse(reg_order %in% reg_warn, " \u2020", ""))
+  reg_lab <- sprintf("%s (%d)%s", reg_show, as.integer(reg_n[reg_show]), ifelse(reg_show %in% reg_excl, ", excluded", ifelse(reg_show %in% reg_warn, " \u2020", "")))
   note <- paste0("One value per pair of clusters\nBar: median\nSmall number: pairs of clusters\nBrackets: alpine clusters of the region",
-                 if (any(reg_order %in% reg_warn)) sprintf("\n\u2020 fewer than %d clusters: interpret with care", CFG$region_warn_clusters) else "")      # the rest is in the caption
+                 if (any(reg_order %in% reg_warn)) sprintf("\n\u2020 fewer than %d clusters: interpret with care", CFG$region_warn_clusters) else "",
+                 if (length(reg_excl)) "\nGrey: excluded range" else "")      # the rest is in the caption
   pG <- ggplot() +
     geom_rect(data = frames, aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax), fill = "white", colour = "grey80", linewidth = 0.3) +
     geom_segment(data = guides_l, aes(x = x, xend = xend, y = y, yend = y), colour = "grey88", linewidth = 0.25, linetype = "dotted") +
-    geom_polygon(data = polys, aes(x, y, group = cell, fill = median), colour = "grey25", linewidth = 0.25) +
-    (if (nrow(dots)) geom_point(data = dots, aes(x, y, fill = median), shape = 21, colour = "grey15", size = 2.2, stroke = 0.5)) +
+    (if (nrow(polys) && any(!polys$excl)) geom_polygon(data = polys[!polys$excl, ], aes(x, y, group = cell, fill = median), colour = "grey25", linewidth = 0.25)) +
+    (if (nrow(polys) && any(polys$excl)) geom_polygon(data = polys[polys$excl, ], aes(x, y, group = cell), fill = "grey78", colour = "grey35", linewidth = 0.25)) +
+    (if (nrow(dots) && any(!dots$excl)) geom_point(data = dots[!dots$excl, ], aes(x, y, fill = median), shape = 21, colour = "grey15", size = 2.2, stroke = 0.5)) +
+    (if (nrow(dots) && any(dots$excl)) geom_point(data = dots[dots$excl, ], aes(x, y), fill = "grey78", shape = 21, colour = "grey15", size = 2.2, stroke = 0.5)) +
     geom_segment(data = meds, aes(x = x, xend = xend, y = y, yend = yend), colour = "black", linewidth = 0.5) +
     geom_segment(data = ticks, aes(x = 0.49, xend = 0.53, y = y, yend = y), colour = "grey30", linewidth = 0.3) +
     geom_text(data = ticks, aes(x = 0.47, y = y, label = label), hjust = 1, size = 2.5, colour = "grey30") +
@@ -1124,7 +1147,14 @@ mst_edges <- function(Dm) {                                                     
 }
 net_nodes <- data.frame(region = reg_all, stringsAsFactors = FALSE)
 net_nodes$n <- as.integer(range_k[net_nodes$region]); miss <- is.na(net_nodes$n); net_nodes$n[miss] <- as.integer(reg_n[net_nodes$region[miss]]); net_nodes$n[is.na(net_nodes$n)] <- 1L
-net_nodes$class <- ifelse(net_nodes$region %in% top_ranges, net_nodes$region, "Other ranges")
+net_nodes$main <- net_nodes$region %in% top_ranges
+# the continent of every range: the main ranges as in C, the others from the centre of their samples in the replicates
+cen_rs <- bind_rows(lapply(region_sets, function(a) a[, c("region", "lon", "lat")])) %>% filter(region != "Other") %>% group_by(region) %>% summarise(lon = mean(lon), lat = mean(lat), .groups = "drop") %>% as.data.frame()
+net_cont <- setNames(continent_of(cen_rs$lat, cen_rs$lon), cen_rs$region)
+net_nodes$continent <- ifelse(net_nodes$main, unname(range_continent[net_nodes$region]), unname(net_cont[net_nodes$region])); net_nodes$continent[is.na(net_nodes$continent)] <- "Other"
+tint_of <- function(cn) { ends <- CFG$cols_continent_shades[[if (cn %in% names(CFG$cols_continent_shades)) cn else "Other"]]; colorRampPalette(c(ends[2], "white"))(10)[5] }      # a pale tint of the continent's colour
+net_nodes$col <- ifelse(net_nodes$main, unname(range_cols[net_nodes$region]), vapply(net_nodes$continent, tint_of, ""))
+net_nodes$named <- net_nodes$main | net_nodes$n >= CFG$net_name_min_clusters
 net_panel_in <- c(7.4, 5.8)                                                                # the panel of the network in inches (width, height): the scale of the node sizes
 # Moves nodes apart where they overlap or are crowded, and pulls them gently back to where the MDS put them (so the layout keeps its structure): the radius of a node is
 # in mm (the dot, plus room for the name of the named ones)
@@ -1153,7 +1183,7 @@ net_layout <- function(value_col, ref = NULL) {
   mds <- cmdscale(as.dist(Dst), k = 2, eig = TRUE); xy <- mds$points; rownames(xy) <- reg_all
   if (!is.null(ref)) xy <- vegan::procrustes(ref, xy, scale = TRUE, symmetric = FALSE)$Yrot            # rotated, reflected and scaled onto the reference layout
   xy_mds <- xy
-  xy <- declump(xy, net_nodes$n, reg_all %in% top_ranges)
+  xy <- declump(xy, net_nodes$n, net_nodes$named)
   K <- length(reg_all); ed <- list()
   for (i in seq_len(K)) for (j in setdiff(order(Df[i, ]), i)[seq_len(min(CFG$net_k, K - 1))]) ed[[length(ed) + 1]] <- c(min(i, j), max(i, j))
   tr <- mst_edges(Df); for (r in seq_len(nrow(tr))) ed[[length(ed) + 1]] <- c(min(tr[r, ]), max(tr[r, ]))
@@ -1163,13 +1193,14 @@ net_layout <- function(value_col, ref = NULL) {
 }
 # Names without overlaps: for every node (large ones first) the first free position among eight directions and growing distances (a free position does not overlap a name
 # already placed, any node or the edge of the panel); estimated text size in mm; ux, uy = plot units per mm of the panel. Returns the anchor and the alignment of every name.
-place_labels <- function(pts, names_to_place, bx, by, ux, uy) {
+place_labels <- function(pts, names_to_place, bx, by, ux, uy, txt_scale = NULL) {
   X <- pts$x / ux; Y <- pts$y / uy; R <- 5.5 * sqrt(pts$n / max(pts$n))                      # nodes in mm (max_size 11 = diameter)
   box <- c(bx[1] / ux, bx[2] / ux, by[1] / uy, by[2] / uy)
   dirs <- list(c(0, 1, 0.5, 0), c(0, -1, 0.5, 1), c(1, 0, 0, 0.5), c(-1, 0, 1, 0.5), c(0.7, 0.7, 0, 0), c(-0.7, 0.7, 1, 0), c(0.7, -0.7, 0, 1), c(-0.7, -0.7, 1, 1))
   placed <- matrix(numeric(0), 0, 4); out <- list()
-  for (k in order(-pts$n)) if (pts$region[k] %in% names_to_place) {
-    w <- 2.05 * nchar(pts$region[k]); h <- 3.9; best <- NULL
+  if (is.null(txt_scale)) txt_scale <- setNames(rep(1, nrow(pts)), pts$region)
+  for (k in order(-(txt_scale[pts$region] == 1), -pts$n)) if (pts$region[k] %in% names_to_place) {            # the main ranges first: they get the best places
+    w <- 2.05 * txt_scale[[pts$region[k]]] * nchar(pts$region[k]); h <- 3.9 * txt_scale[[pts$region[k]]]; best <- NULL
     for (d in c(0.8, 2.5, 4.5, 7, 10, 14, 19)) for (dr in dirs) {
       if (!is.null(best)) break
       ax <- X[k] + dr[1] * (R[k] + d); ay <- Y[k] + dr[2] * (R[k] + d)
@@ -1188,13 +1219,15 @@ place_labels <- function(pts, names_to_place, bx, by, ux, uy) {
 net_plot <- function(L, tag, legend_title, panel_in = net_panel_in) {
   nodes <- L$nodes[order(-L$nodes$n), ]; e <- L$edges
   pad <- 0.16; rx <- range(nodes$x); ry <- range(nodes$y); bx <- rx + c(-1, 1) * pad * diff(rx); by <- ry + c(-1, 1) * pad * diff(ry)
-  lab <- place_labels(nodes, top_ranges, bx, by, diff(bx) / (panel_in[1] * 25.4), diff(by) / (panel_in[2] * 25.4))
+  lab <- place_labels(nodes, nodes$region[nodes$named], bx, by, diff(bx) / (panel_in[1] * 25.4), diff(by) / (panel_in[2] * 25.4), txt_scale = setNames(ifelse(nodes$main, 1, 0.8), nodes$region))
+  lab$main <- nodes$main[match(lab$region, nodes$region)]
   ggplot() +
     geom_segment(data = e, aes(x, y, xend = xend, yend = yend), colour = "grey35", linewidth = 1.7, alpha = 0.3, lineend = "round") +          # an outline: pale colours stay visible
     geom_segment(data = e, aes(x, y, xend = xend, yend = yend, colour = value), linewidth = 1.1, alpha = 0.95, lineend = "round") +
-    geom_point(data = nodes, aes(x, y, size = n, fill = class), shape = 21, colour = "grey15", stroke = 0.5) +
-    geom_text(data = lab, aes(ax, ay, label = region, hjust = hj, vjust = vj), size = 3.3, fontface = "bold") +
-    scale_fill_manual(values = c(range_cols, "Other ranges" = CFG$col_other_ranges), guide = "none") +
+    geom_point(data = nodes, aes(x, y, size = n, fill = col), shape = 21, colour = "grey15", stroke = 0.5) +
+    geom_text(data = lab[!lab$main, ], aes(ax, ay, label = region, hjust = hj, vjust = vj), size = 2.7, colour = "grey20") +
+    geom_text(data = lab[lab$main, ], aes(ax, ay, label = region, hjust = hj, vjust = vj), size = 3.3, fontface = "bold") +
+    scale_fill_identity() +
     scale_size_area(max_size = 11, name = "Alpine clusters\nin the range", labels = scales::comma) +
     scale_colour_gradientn(colours = c("#2C7BB6", "#FFFFBF", "#D7191C"), name = legend_title, limits = range(e$value)) +
     guides(colour = guide_colourbar(title.position = "top", barwidth = unit(0.2, "in"), barheight = unit(2.4, "in")), size = guide_legend(title.position = "top", ncol = 1)) +
@@ -1209,8 +1242,8 @@ leg_cell <- function(p) {                                                       
 L_main <- NULL; pD <- NULL; pD_leg <- NULL
 if (!is.null(cell_stats) && length(reg_all) >= 3) {
   L_main <- net_layout("median_adj")
-  message(sprintf("Range network: %d ranges (%d named), %d edges (the %d most similar ranges of each + the minimum spanning tree); the two MDS axes show %.0f%% of the variation of the median dissimilarities",
-                  length(reg_all), length(top_ranges), L_main$n_edges, CFG$net_k, 100 * L_main$share))
+  message(sprintf("Range network: %d ranges (%d named, %d of them main ranges), %d edges (the %d most similar ranges of each + the minimum spanning tree); the two MDS axes show %.0f%% of the variation of the median dissimilarities",
+                  length(reg_all), sum(net_nodes$named), sum(net_nodes$main), L_main$n_edges, CFG$net_k, 100 * L_main$share))
   pD <- net_plot(L_main, "D", "Median Bray-Curtis\ndissimilarity of the pairs\nof clusters between\nranges (adjusted for\ndepth / unmapped,\nnot for distance)")
   pD_leg <- leg_cell(pD)
 } else message("Range network: fewer than 3 ranges: panel D is left out")
@@ -1225,7 +1258,8 @@ caption <- paste(
   sprintf("C: UMAP of the community composition (Hellinger-transformed relative abundances of the %d most abundant OTUs, %d principal components) of %s alpine samples, coloured by %s (one colour family per continent: Europe reds, Asia blues, North America greens, South America oranges, Oceania purples, Africa golds; the largest range of a continent the darkest; the number of samples in brackets; the other ranges together as Other ranges), and %s lowland samples spread evenly over latitude / longitude (grey); small multiples: the first panel all alpine samples against the lowland, then one panel per continent with its ranges coloured and all other samples pale grey; ellipses = the central half of the samples (robust) of a range. UMAP keeps neighbourhoods, not distances: the axes, the size of the clusters and the gaps between them are not quantitative.",
           CFG$umap_top_otus, CFG$umap_pcs, format(sum(nm$group == "Alpine"), big.mark = ","), region_kind, format(sum(nm$group == "Lowland"), big.mark = ",")),
   umap_cap,
-  if (!is.null(pD)) sprintf("D: network of the mountain ranges (%s; %d ranges, the %d coloured ones named; colours as in C, size of a node = number of alpine clusters). The nodes are placed by classical multidimensional scaling of the median Bray-Curtis dissimilarity of all pairs of alpine clusters of two ranges (%d replicates of one random alpine sample per cluster; every pair of clusters has one value, the mean over the replicates, so that every cluster counts equally), adjusted to the median differences in sequencing depth and unmapped proportion but NOT for geographic distance: ranges with similar communities lie close together, distance included (the two axes show %.0f%% of the variation; the dissimilarities are first reduced by a common floor so that their differences, not their common level, place the nodes, and nodes that overlap are moved slightly apart). Edges: every range linked to its %d most similar ranges and the minimum spanning tree, coloured by the median dissimilarity. Supplementary Figure 7 also shows the dissimilarity at the same geographic distance.", region_kind, length(reg_all), length(top_ranges), CFG$n_rep, 100 * L_main$share, CFG$net_k))
+  if (nzchar(excl_txt)) excl_txt,
+  if (!is.null(pD)) sprintf("D: network of the mountain ranges (%s; %d ranges; colours as in C for the %d main ranges, named in bold; the other ranges are pale tints of the colour of their continent and are named if they have at least 3 clusters; size of a node = number of alpine clusters). The nodes are placed by classical multidimensional scaling of the median Bray-Curtis dissimilarity of all pairs of alpine clusters of two ranges (%d replicates of one random alpine sample per cluster; every pair of clusters has one value, the mean over the replicates, so that every cluster counts equally), adjusted to the median differences in sequencing depth and unmapped proportion but NOT for geographic distance: ranges with similar communities lie close together, distance included (the two axes show %.0f%% of the variation; the dissimilarities are first reduced by a common floor so that their differences, not their common level, place the nodes, and nodes that overlap are moved slightly apart). Edges: every range linked to its %d most similar ranges and the minimum spanning tree, coloured by the median dissimilarity. Supplementary Figure 7 also shows the dissimilarity at the same geographic distance.", region_kind, length(reg_all), length(top_ranges), CFG$n_rep, 100 * L_main$share, CFG$net_k))
 rows3 <- list(list(pA, pB), list(pC, pC_leg)); if (!is.null(pD)) rows3[[3]] <- list(pD, pD_leg)
 assemble_fig(file.path(out_folder, "fig3_distance_decay.png"), rows3, get_legend(pA), caption, width = 14, height = if (is.null(pD)) 17 else 23.5, row_heights = c(1, 1.7, 1.3)[seq_along(rows3)],
              row_widths = list(NULL, c(2, 1), c(1.5, 1)))
@@ -1236,16 +1270,18 @@ if (!is.null(L_main)) {
   L_sp <- net_layout("median_adj_space", ref = L_main$xy_mds)
   pS7a <- net_plot(L_main, "A", "Median dissimilarity of\nthe pairs of clusters\nbetween ranges (adjusted\nfor depth / unmapped,\nnot for distance)")
   pS7b <- net_plot(L_sp, "B", "Median dissimilarity of\nthe pairs of clusters\nbetween ranges (adjusted\nfor depth / unmapped\nAND for distance)")
-  cap7 <- paste("Supplementary Figure 7. The network of the mountain ranges (nodes: ranges, colours as in Figure 3C, size = number of alpine clusters; the coloured ranges are named) without (A, as in Figure 3D) and with (B) the adjustment for geographic distance.",
+  cap7 <- paste("Supplementary Figure 7. The network of the mountain ranges (nodes: ranges, colours as in Figure 3C for the main ranges and pale tints of the continent colour for the others, size = number of alpine clusters; the main ranges are named in bold, the others if they have enough clusters) without (A, as in Figure 3D) and with (B) the adjustment for geographic distance.",
                 "The nodes are placed by classical multidimensional scaling of the median Bray-Curtis dissimilarity of all pairs of alpine clusters of two ranges (replicates of one random alpine sample per cluster; every pair of clusters has one value, the mean over the replicates), edges link every range to its most similar ranges (and the minimum spanning tree), coloured by the median dissimilarity. In both panels the dissimilarity is adjusted to the median differences in sequencing depth and unmapped proportion; in B also to the median geographic distance of the pairs (a common slope of the dissimilarity on log10 distance, estimated within pairs of ranges), so B shows how different the ranges are at the same distance; its layout is rotated and scaled onto that of A to make the two comparable. Compare the two: ranges that are far apart in A and close together in B are far apart in space rather than different.",
-                sprintf("The two axes show %.0f%% (A) and %.0f%% (B) of the variation. The numbers (raw and adjusted medians, median distance, number of pairs of clusters) are in tables/range_pair_dissimilarity.csv.", 100 * L_main$share, 100 * L_sp$share))
+                sprintf("The two axes show %.0f%% (A) and %.0f%% (B) of the variation. The numbers (raw and adjusted medians, median distance, number of pairs of clusters) are in tables/range_pair_dissimilarity.csv.", 100 * L_main$share, 100 * L_sp$share),
+                if (nzchar(excl_txt)) excl_txt)
   assemble_fig(file.path(out_folder, "figS7_range_dissimilarity_space.png"), list(list(pS7a, leg_cell(pS7a)), list(pS7b, leg_cell(pS7b))), NULL, cap7, width = 14, height = 14.5, row_heights = c(1, 1), row_widths = list(c(1.5, 1), c(1.5, 1)))
 }
 # Supplementary 8: the distributions behind the medians, a grid of violins (the top ranges)
 if (!is.null(pG)) {
   cap8 <- paste("Supplementary Figure 8. The distributions of the Bray-Curtis dissimilarities (unadjusted) of all pairs of alpine clusters within and between the mountain ranges with the most alpine samples (", length(reg_keep), " ranges; one value per pair of clusters = the mean over ", CFG$n_rep, " replicates of one random alpine sample per cluster, so that every cluster counts equally): one violin per cell (a cell with fewer than 5 pairs of clusters shows the values themselves; diagonal: within a range), the same vertical scale in all cells",
                 if (identical(CFG$region_axis, "log1m")) ", stretched near 1" else "", " (values at the left of every row), coloured by the median (red = more dissimilar); rows and columns ordered by hierarchical clustering of the medians. The median distance of the pairs of every cell is in tables/range_pair_dissimilarity.csv.",
-                if (any(reg_order %in% reg_warn)) paste0(" A dagger marks ranges with fewer than ", CFG$region_warn_clusters, " alpine clusters (", paste(reg_order[reg_order %in% reg_warn], collapse = ", "), "): their distributions rest on few pairs of clusters, and a range with 2 clusters on a single within-range pair, whose violin only shows the variation between the samples drawn for those clusters; interpret with care.") else "", sep = "")
+                if (any(reg_order %in% reg_warn)) paste0(" A dagger marks ranges with fewer than ", CFG$region_warn_clusters, " alpine clusters (", paste(reg_order[reg_order %in% reg_warn], collapse = ", "), "): their distributions rest on few pairs of clusters, and a range with 2 clusters on a single within-range pair, whose violin only shows the variation between the samples drawn for those clusters; interpret with care.") else "",
+                if (length(reg_excl)) paste0(" Grey, at the end of the grid: ", paste(reg_excl, collapse = ", "), ", excluded from the comparison of ranges (not in the medians, the colour scale, the order of the grid, the network or Supplementary Figure 7) because of its atypical distributions.") else "", sep = "")
   assemble_fig(file.path(out_folder, "figS8_range_violins.png"), list(list(pG)), NULL, cap8, width = 10, height = 11)
 }
 
