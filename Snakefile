@@ -28,11 +28,12 @@ FILTERED_BIOM = f"{DATA}/microbeatlas/otuTable_soilCurated_OTU97_nextMAPrelease_
 ALL_DATA_CSV = f"{RESULTS}/all_sampled_data.csv"
 
 # the flag files below are written by the analysis scripts themselves, inside the folder they are given
-DONE_1 = f"{RESULTS}/1_alpha_overview/.done"
+DONE_1 = f"{RESULTS}/1_alpha_overview/fig1_panels.rds"
 DONE_2 = f"{RESULTS}/2_alpha_beta_elevation_latitude/.done"
 DONE_3 = f"{RESULTS}/3_distance_decay/.done"
 DONE_4 = f"{RESULTS}/4_variance_partitioning/.done"
 DONE_5 = f"{RESULTS}/5_family_differential_abundance/.done"
+DONE_6 = f"{RESULTS}/6_alpine_specialist_otus/.done"
 
 # The first rule is the default target of `snakemake`: everything
 rule all:
@@ -41,7 +42,8 @@ rule all:
         DONE_2,
         DONE_3,
         DONE_4,
-        DONE_5
+        DONE_5,
+        DONE_6
 
 # Script 3: distance decay of community dissimilarity in alpine / peri-alpine / lowland samples. Needs perialpine_alpine and cluster_id (written
 # by prepare_microbeatlas_data) and the filtered BIOM; no climate / soil / terrain tables
@@ -96,7 +98,26 @@ rule analysis_step_5:
         envfit=os.path.join(os.path.dirname(DONE_4), "tables", "envfit_summary.csv")
     shell:
         """
-        Rscript scripts/5_taxonomy.R {input.table} {input.env} {input.biom} {params.out_folder} {params.envfit}
+        Rscript scripts/5_family_differential_abundance.R {input.table} {input.env} {input.biom} {params.out_folder} {params.envfit}
+        """
+
+
+# Script 6: alpine specialist OTUs (niche breadth against a permutation null + alpine affinity): taxonomy (A), space (B), season and soil depth (C). Needs the taxonomy file in data/microbeatlas.
+rule analysis_step_6:
+    input:
+        table=SAMPLE_DATA_FILTERED,
+        env=ALL_DATA_CSV,
+        biom=FILTERED_BIOM
+    output:
+        DONE_6
+    conda:
+        "envs/r_analyses/environment.yml"
+    threads: 4
+    params:
+        out_folder=os.path.dirname(DONE_6)
+    shell:
+        """
+        Rscript scripts/6_alpine_specialist_otus.R {input.table} {input.env} {input.biom} {params.out_folder}
         """
 
 
