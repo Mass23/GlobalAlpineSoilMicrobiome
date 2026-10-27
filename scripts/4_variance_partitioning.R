@@ -48,6 +48,24 @@
 #   share that goes with technical covariates (log10 reads and the share of unmapped reads, cluster means) alone and beyond environment + space. The unmapped READS are
 #   not in the composition (the 'Unmapped' row of the BIOM is removed: relative abundances are shares of the mapped reads).
 #
+# TAXONOMY (the default analysis): the OTUs are aggregated to GENERA (tax_rank), all of them (top_otus = Inf), and the genera are then filtered on prevalence (min_samples, min_clusters). OTUs whose
+#   lineage stops above genus are put into 'unclassified' taxa of their lowest known rank (tax_fill) so that their reads are kept; the log gives the shares. tax_rank = NULL: OTU level.
+#
+# TAXONOMY FILE: read from a sample of its lines (the OTU id column and the lineage column are detected; tax_id_col / tax_lineage_col override). Before anything else the OTUs
+#   whose lineage matches tax_exclude (chloroplasts, mitochondria, eukaryotes) are removed and the log reports their share of the reads per group: plant / organelle DNA varies a lot
+#   between studies and is not part of the soil bacterial community (NULL keeps them; the alpha metrics of the sample table were computed with them).
+#
+# OTU OVERLAP (otu_overlap.csv, log; fig5b_otu_overlap.png, cv_otu_overlap_test.csv): how many alpine clusters (studies / places) have each OTU, and the cross-validated R2 of the composition
+#   restricted to the OTUs of at least k clusters (cv_sens_min_clusters). Studies with other primers / regions / depths see different OTUs: if the R2 rises with k, set min_clusters.
+#   TAXONOMY (taxonomy_file; read with auto-detection of the id column, a header, one lineage string or one column per rank; see the log for the parsed example): the rank test shows the
+#   cross-validated R2 of the composition at genus ... phylum level (cv_taxonomic_rank_test.csv, panel C of fig5b); tax_rank = "genus" makes the whole analysis work at that rank.
+#
+# PREDICTIVE PARTITION (section 7, fig5_predictive_partition.png; settings cv_*): the adjusted-R2 partition above uses few, linear predictors (principal components, 12 spatial
+#   eigenvectors) because every degree of freedom is penalised on ~150 clusters. Section 7 uses ALL the data (all clusters, all samples, precision weights), splines for the environment
+#   (every variable) and for space (spherical spline), and the technical covariates (read depth, unmapped share) as a third set, under a ridge penalty, and scores the models by
+#   leave-clusters-out cross-validation; see the comments of that section. 'Technically corrected' composition = at deep sequencing (tech_ref_q) and no unmapped reads
+#   (tech_ref_unmapped; this extrapolates if no sample has so few unmapped reads).
+#
 # OTU FILTER: an OTU is kept if it is present (at least one read) in at least min_samples (default 5) of the analysed samples (alpine + lowland replicates pooled), and in
 #   at least min_prevalence of them (default 0); top_otus then caps their number (the most abundant ones; Inf = all).
 #
@@ -65,8 +83,9 @@
 #         download_earth_data) and the filtered BIOM
 # Usage : Rscript 4_variance_partitioning.R [sample_table] [all_sampled_data.csv] [filtered_biom] [out_folder]
 # Output: <out_folder>/fig4_variance_partitioning.png and tables/varpart_fractions.csv, varpart_differences.csv (per group and alpine - lowland),
-#         varpart_sensitivity.csv, predictor_sets.csv, sample_counts.csv, diagnostics_noise_ceiling_technical.csv, response_sensitivity.csv (+ fig4_response_sensitivity.png)
-# Needs : R packages vegan, geosphere, rbiom, Matrix, dplyr, ggplot2, RSpectra (conda: r-vegan r-geosphere r-rbiom r-matrix r-tidyverse r-rspectra)
+#         varpart_sensitivity.csv, predictor_sets.csv, sample_counts.csv, diagnostics_noise_ceiling_technical.csv, response_sensitivity.csv (+ fig4_response_sensitivity.png),
+#         cv_partition.csv, cv_difference_alpine.csv, cv_sensitivity.csv (+ fig5_predictive_partition.png: the cross-validated partition with splines and technical covariates)
+# Needs : R packages vegan, geosphere, rbiom, Matrix, dplyr, ggplot2, mgcv (spherical splines), splines, RSpectra (conda: r-vegan r-geosphere r-rbiom r-matrix r-tidyverse r-rspectra)
 # =============================================================================
 
 suppressPackageStartupMessages({
@@ -99,7 +118,7 @@ CFG <- list(
   lowland_reps = 5,             # lowland replicates analysed (rep_01, rep_02, ...; 0 = no lowland comparison)
   alpine_draws = 5,             # random draws of the samples that form the alpine cluster means
   rare_depth  = 1000,           # samples with fewer reads are dropped
-  top_otus    = 5000,           # at most this many OTUs (the most abundant of those that pass the filters below; Inf = all of them)
+  top_otus    = Inf,            # at most this many OTUs / taxa (the most abundant of those that pass the filters below; Inf = all of them)
   env_sets    = list(
     Climate = c("^bio[0-9]{2}$", "^(fcf|fgd|scd)$", "^(clt|cmi|hurs|pet|pr|rsds|sfcWind|spei12|spi12|tas|tasmax|tasmin|vpd)$"),
     Soil    = c("_30cm_avg$"),
@@ -115,6 +134,19 @@ CFG <- list(
   boot        = 500,            # bootstrap resamples of the clusters
   min_samples = 5,              # the OTUs of the composition must be present (at least one read) in at least this many of the analysed samples (alpine + lowland pooled); 0 = no filter. Rare OTUs are mostly noise: see response_sensitivity
   min_prevalence = 0,           # ... and in at least this share of them (0 = no filter)
+  cv_partition = TRUE,          # section 7: the cross-validated predictive partition with splines and technical covariates (fig5_predictive_partition.png)
+  cv_folds = 10, cv_repeats = 3, cv_block_deg = 10, cv_pcs = 60, cv_env_df = 3, cv_k_space = 30, cv_boot = 500, cv_lowland_draws = 3,
+  cv_lambdas = 10^seq(-2, 4, length.out = 25), tech_ref_q = 0.9, tech_ref_unmapped = 0,
+  cv_sens_env_df = c(1, 2, 3), cv_sens_k_space = c(10, 20, 30, 50),
+  min_clusters = 5,             # prevalence filter (after the aggregation to taxa): present in at least this many ALPINE CLUSTERS (studies / places); 0 = no filter. min_samples counts samples, and all samples of a study share their OTUs
+  cv_sens_min_clusters = c(0, 3, 5, 10, 20, 40),   # the OTU-overlap test: the cross-validated R2 when only the OTUs of at least k alpine clusters are used (fig5b_otu_overlap.png)
+  taxonomy_file = file.path(data_folder, "microbeatlas", "taxonomy_soilCurated_OTU97_nextMAPrelease.tsv"),   # the taxonomy of the OTUs (NULL or a missing file: no taxonomic analysis)
+  tax_rank = "genus",           # the analysis works on taxa of this rank (domain, phylum, class, order, family, genus); NULL: on the OTUs; "genus" (or domain, phylum, class, order, family): aggregate the OTUs to this rank before everything else
+  tax_fill = TRUE,              # an OTU whose lineage stops above tax_rank goes to an 'unclassified' taxon of its lowest known rank, so that its reads are kept (FALSE: it is left out)
+  tax_exclude = "chloroplast|mitochond|Eukaryota|Eukarya",   # OTUs whose lineage matches this (regular expression, ignoring case) are removed first: plant / organelle DNA, not soil bacteria. NULL = keep them
+  tax_id_col = NULL, tax_lineage_col = NULL,   # the columns of the taxonomy file with the OTU id and the lineage (numbers); NULL = detected (see the log)
+  tax_skip = 0,                 # lineage strings: leading elements to skip so that the first remaining one is the domain (check the 'Example lineage' line of the log)
+  cv_tax_ranks = c("genus", "family", "order", "class", "phylum"),   # the rank test: the cross-validated R2 of the composition at these ranks (with the taxonomy file)
   response_sensitivity = TRUE,  # how the noise ceiling and the explained variance depend on the OTUs used (number, prevalence) and on the transformation (fig4_response_sensitivity.png)
   sens_otus   = c(50, 200, 1000, 5000, Inf), sens_prev = c(0.02, 0.05, 0.10, 0.25),   # ... the grid: the most abundant OTUs / the OTUs present in at least this share of the samples of the group
   sens_k_space = c(4, 8, 12, 20), sens_pcs_max = c(2, 4, 6),   # the grid of the sensitivity panel
@@ -123,7 +155,8 @@ CFG <- list(
   cols_group = c(Alpine = "#2B6CB0", Lowland = "#7C9885", `Alpine - lowland` = "#222222")
 )
 if (TEST_MODE) { out_folder <- paste0(out_folder, "_TEST"); CFG$top_otus <- 300; CFG$boot <- 40; CFG$within_pcs <- 30; CFG$among_n_per_cluster <- 2; CFG$within_min_n <- 4
-                 CFG$sens_k_space <- c(4, 8); CFG$sens_pcs_max <- c(2, 4); CFG$lowland_reps <- 2; CFG$alpine_draws <- 2; CFG$sens_otus <- c(50, Inf); CFG$sens_prev <- c(0.05, 0.25) }
+                 CFG$sens_k_space <- c(4, 8); CFG$sens_pcs_max <- c(2, 4); CFG$lowland_reps <- 2; CFG$alpine_draws <- 2; CFG$sens_otus <- c(50, Inf); CFG$sens_prev <- c(0.05, 0.25)
+                 CFG$cv_folds <- 5; CFG$cv_repeats <- 1; CFG$cv_pcs <- 20; CFG$cv_boot <- 50; CFG$cv_lowland_draws <- 1; CFG$cv_sens_env_df <- c(1, 3); CFG$cv_sens_k_space <- c(10, 20); CFG$cv_sens_min_clusters <- c(0, 5); CFG$cv_tax_ranks <- c("genus", "phylum"); CFG$cv_lambdas <- 10^seq(-2, 4, length.out = 9) }
 dir.create(file.path(out_folder, "tables"), recursive = TRUE, showWarnings = FALSE)
 out_t <- function(...) file.path(out_folder, "tables", ...)
 set.seed(1)
@@ -176,6 +209,67 @@ ctr_by <- function(M, g) { M <- as.matrix(M); M - rowmean(M, g)[match(g, rowname
 # so the bootstrap distribution of a difference of adjusted R2 is shifted. The interval keeps the SPREAD of the bootstrap but is centred on the estimate (the bias of the bootstrap mean removed).
 bc_ci <- function(est, b) est + (unname(quantile(b, c(0.025, 0.975), na.rm = TRUE)) - mean(b, na.rm = TRUE))
 
+cluster_ids <- function(t_g) { cl <- as.character(t_g[[CFG$cluster_col]]); no <- is.na(cl) | !nzchar(cl); cl[no] <- paste0("none", which(no)); cl }
+
+# The taxonomy table of the OTUs (taxonomy_soilCurated_OTU97_nextMAPrelease.tsv): TAB-separated, a header (OID, OTU, Tax, ..., OrigTax, ..., RemapSeqs), long fields (lists of species /
+# accessions) and the sequence. Read from a sample of its lines:
+#   * the OTU ID is the column OID (or, without header, the column whose values match the OTUs of the BIOM, exactly or by the number at the end of the id: "97_123" ~ "123");
+#   * the LINEAGE is the column Tax (or, without header, the short column with the most ";" separators); the ranks are its first six elements after tax_skip, with [organelle]
+#     tags, (confidence) values and prefixes (d__) removed. The raw Tax and OrigTax strings are kept to recognise chloroplasts, mitochondria and eukaryotes.
+# tax_id_col / tax_lineage_col (column numbers) override the detection. Only these columns are read from the whole file.
+read_taxonomy <- function(file, otu_ids) {
+  smp <- readLines(file, n = 400, warn = FALSE); fl <- strsplit(smp, "\t", fixed = TRUE); nc <- max(lengths(fl))
+  if (nc < 2) { message("The taxonomy file has no tab-separated columns: ", file); return(NULL) }
+  M <- t(vapply(fl, function(z) { length(z) <- nc; z[is.na(z)] <- ""; z }, character(nc)))
+  hdr <- tolower(trimws(M[1, ])); has_hdr <- sum(hdr %in% c("oid", "otu", "tax", "taxonomy", "lineage", "origtax", "repsequenceid", "seqcount", "remapseqs")) >= 2
+  message(sprintf("Taxonomy file %s: %d columns%s", basename(file), nc, if (has_hdr) paste0("; header: ", paste(substr(M[1, seq_len(min(nc, 21))], 1, 14), collapse = " ")) else paste0("; the last four fields of the first line: ", paste(substr(M[1, max(1, nc - 3):nc], 1, 40), collapse = " | "))))
+  if (has_hdr) M <- M[-1, , drop = FALSE]
+  nkey <- function(x) sub("^.*?([0-9]+)$", "\\1", x, perl = TRUE); okey <- nkey(otu_ids)
+  uniq <- vapply(seq_len(nc), function(j) length(unique(M[, j])) / nrow(M), 1)                          # an id column has a different value in every row (a length column does not)
+  exact <- vapply(seq_len(nc), function(j) mean(M[, j] %in% otu_ids), 1); numk <- vapply(seq_len(nc), function(j) mean(grepl("[0-9]+$", M[, j]) & nkey(M[, j]) %in% okey), 1)
+  last_max <- function(v) { w <- which(v >= max(v) - 1e-9); w[length(w)] }
+  h_id <- if (has_hdr) match(intersect(c("oid", "otu_id", "otuid", "id"), hdr)[1], hdr) else NA_integer_
+  if (!is.null(CFG$tax_id_col)) { idc <- CFG$tax_id_col; use_exact <- exact[idc] >= 0.3
+  } else if (!is.na(h_id) && max(exact[h_id], numk[h_id]) >= 0.3) { idc <- h_id; use_exact <- exact[h_id] >= 0.3
+  } else { use_exact <- max(exact * uniq) >= 0.3; idc <- if (use_exact) last_max(exact * uniq) else last_max(numk * uniq)
+    if (max(exact * uniq, numk * uniq) < 0.3) { message(sprintf("  no column of the taxonomy file matches the OTU ids of the BIOM (best: %.0f%%); examples of the BIOM ids: %s; set tax_id_col: no taxonomic analysis", 100 * max(exact * uniq, numk * uniq), paste(head(otu_ids, 3), collapse = ", "))); return(NULL) } }
+  cand <- setdiff(seq_len(nc), idc)
+  sc <- vapply(cand, function(j) mean(grepl(";", M[, j], fixed = TRUE)), 1); len <- vapply(cand, function(j) median(nchar(M[, j])), 1)
+  nsep <- vapply(cand, function(j) mean(nchar(M[, j]) - nchar(gsub(";", "", M[, j], fixed = TRUE))), 1); okc <- sc > 0.5 & len < 600
+  h_lin <- if (has_hdr) match(intersect(c("tax", "taxonomy", "lineage"), hdr)[1], hdr) else NA_integer_
+  lc <- if (!is.null(CFG$tax_lineage_col)) CFG$tax_lineage_col else if (!is.na(h_lin)) h_lin else if (any(okc)) cand[okc][which.max(nsep[okc])] else NA_integer_
+  if (is.na(lc)) { message("  no column of the taxonomy file looks like a lineage (short strings with ';'); set tax_lineage_col: no taxonomic analysis"); return(NULL) }
+  oc <- if (has_hdr) match("origtax", hdr) else NA_integer_
+  cc <- rep("NULL", nc); cc[na.omit(unique(c(idc, lc, oc)))] <- "character"
+  tx <- read.delim(file, header = FALSE, quote = "", comment.char = "", stringsAsFactors = FALSE, colClasses = cc, fill = TRUE, na.strings = character(0), col.names = paste0("V", seq_len(nc)))
+  id_f <- tx[[paste0("V", idc)]]; raw_f <- tx[[paste0("V", lc)]]; orig_f <- if (!is.na(oc)) tx[[paste0("V", oc)]] else rep("", nrow(tx))
+  bi <- if (use_exact) match(id_f, otu_ids) else match(nkey(id_f), okey)
+  ok <- !is.na(bi) & !duplicated(bi); id_b <- otu_ids[bi[ok]]; raw <- raw_f[ok]; excl <- paste(raw_f[ok], orig_f[ok])
+  message(sprintf("  OTU id = column %d%s (%s), lineage = column %d%s%s; %d of the %d OTUs of the BIOM have a taxonomy", idc, if (has_hdr) paste0(" '", hdr[idc], "'") else "", if (use_exact) "same ids as the BIOM" else "matched by the number at the end of the id",
+                  lc, if (has_hdr) paste0(" '", hdr[lc], "'") else "", if (!is.na(oc)) paste0(", original taxonomy = column ", oc) else "", length(id_b), length(otu_ids)))
+  clean <- function(z) { z <- trimws(z); z <- gsub("\\[[^]]*\\]", "", z); z <- sub("\\s*\\([0-9.]+\\)$", "", z); z <- sub("^[A-Za-z]__", "", z)
+    z[!nzchar(z) | grepl("^(uncultured|unidentified|unclassified|incertae sedis|unassigned|NA|environmental sample|metagenome)", z, ignore.case = TRUE)] <- NA_character_; z }
+  parts <- strsplit(raw, ";", fixed = TRUE); if (CFG$tax_skip > 0) parts <- lapply(parts, function(z) if (length(z) > CFG$tax_skip) z[-seq_len(CFG$tax_skip)] else character(0))
+  ranks <- matrix(t(vapply(parts, function(z) { z <- clean(z); length(z) <- 6; z }, character(6))), ncol = 6, dimnames = list(NULL, c("domain", "phylum", "class", "order", "family", "genus")))
+  set.seed(2); ex <- sample(length(raw), min(3, length(raw)))
+  for (i in ex) message(sprintf("  example: OTU %s | %s  ->  %s", id_b[i], substr(raw[i], 1, 80), paste(ifelse(is.na(ranks[i, ]), "-", ranks[i, ]), collapse = " > ")))
+  message(sprintf("  OTUs with a phylum / family / genus: %.0f%% / %.0f%% / %.0f%%; domains: %s", 100 * mean(!is.na(ranks[, 2])), 100 * mean(!is.na(ranks[, 5])), 100 * mean(!is.na(ranks[, 6])),
+                  paste(head(paste0(names(sort(table(ranks[, 1]), decreasing = TRUE)), " ", sort(table(ranks[, 1]), decreasing = TRUE)), 4), collapse = ", ")))
+  list(ids = id_b, ranks = ranks, raw = raw, excl = excl)
+}
+tax_agg <- function(tax, rank, ids, fill = CFG$tax_fill) {                                               # an indicator matrix taxa x OTUs for a rank
+  rk <- if (is.numeric(rank)) rank else match(tolower(rank), c("domain", "phylum", "class", "order", "family", "genus")); if (is.na(rk)) stop("tax_rank must be domain, phylum, class, order, family or genus")
+  R <- tax$ranks[match(ids, tax$ids), , drop = FALSE]; has <- !is.na(R[, rk]); lab <- rep(NA_character_, length(ids)); filled <- rep(FALSE, length(ids))
+  lab[has] <- apply(R[has, seq_len(rk), drop = FALSE], 1, function(z) paste(z[!is.na(z)], collapse = ";"))
+  if (isTRUE(fill)) {                                                                                  # lineage stops above the rank: an 'unclassified' taxon of the lowest known rank
+    rest <- which(!has & !is.na(R[, 1]))
+    if (length(rest)) { low <- vapply(rest, function(i) max(which(!is.na(R[i, seq_len(rk)]))), 1L)
+      lab[rest] <- vapply(seq_along(rest), function(k) paste0(paste(R[rest[k], seq_len(low[k])][!is.na(R[rest[k], seq_len(low[k])])], collapse = ";"), ";(unclassified ", colnames(R)[rk], ")"), ""); filled[rest] <- TRUE }
+  }
+  assigned <- !is.na(lab); taxa <- sort(unique(lab[assigned]))
+  list(Agg = Matrix::sparseMatrix(i = match(lab[assigned], taxa), j = which(assigned), x = 1, dims = c(length(taxa), length(ids)), dimnames = list(taxa, ids)), assigned = assigned, filled = filled, n_taxa = length(taxa))
+}
+
 ## ---- 1. Data ------------------------------------------------------------------------------------------------------------------------------
 raw <- read.delim(CFG$sample_file, quote = "", comment.char = "", stringsAsFactors = FALSE, check.names = FALSE, fill = FALSE)
 need <- c(CFG$id_table, CFG$biom_id, CFG$group_col, CFG$cluster_col, "Latitude", "Longitude", "alpha_total_n_reads", "alpha_n_otus", "alpha_shannon", "alpha_pielou")
@@ -201,23 +295,55 @@ message("Reading the BIOM: ", CFG$biom_file)
 use <- sort(unique(unlist(grp_idx)))
 biom <- rbiom::read_biom(CFG$biom_file); ids <- intersect(tab[[CFG$biom_id]][use], biom$samples); biom <- biom[ids]
 X <- to_sparse(biom$counts); X <- X[rownames(X) != "Unmapped", , drop = FALSE]; rm(biom); invisible(gc())
-col_of <- match(tab[[CFG$biom_id]], colnames(X)); tot <- Matrix::colSums(X)
+col_of <- match(tab[[CFG$biom_id]], colnames(X))
+tax <- NULL
+if (!is.null(CFG$taxonomy_file)) { if (file.exists(CFG$taxonomy_file)) tax <- read_taxonomy(CFG$taxonomy_file, rownames(X)) else message("Taxonomy file not found (", CFG$taxonomy_file, "): no taxonomic analysis") }
+if (!is.null(tax) && !is.null(CFG$tax_exclude) && nzchar(CFG$tax_exclude)) {                              # plant / organelle DNA is not part of the soil bacterial community
+  ex <- rownames(X) %in% tax$ids[grepl(CFG$tax_exclude, tax$excl, ignore.case = TRUE)]
+  org_share <- function(pat) { cols <- unique(col_of[unlist(grp_idx[grepl(pat, names(grp_idx))])]); cols <- cols[!is.na(cols)]; if (!length(cols)) return(NULL)
+    v <- Matrix::colSums(X[ex, cols, drop = FALSE]) / pmax(Matrix::colSums(X[, cols, drop = FALSE]), 1); c(median = median(v), above20 = mean(v > 0.2), above50 = mean(v > 0.5)) }
+  for (gp in c("Alpine", "Lowland")) { v <- org_share(paste0("^", gp)); if (!is.null(v)) message(sprintf("  chloroplast / mitochondria / eukaryote OTUs (%d, '%s'): %s samples: median %.1f%% of the reads; %.0f%% of the samples have more than 20%%, %.0f%% more than 50%%",
+                                                                           sum(ex), CFG$tax_exclude, gp, 100 * v[["median"]], 100 * v[["above20"]], 100 * v[["above50"]])) }
+  X <- X[!ex, , drop = FALSE]; message(sprintf("  these OTUs are removed: %d OTUs remain (relative abundances are shares of the remaining reads)", nrow(X)))
+}
+tot <- Matrix::colSums(X)
 good <- !is.na(col_of) & tot[pmax(col_of, 1)] >= CFG$rare_depth
 grp_idx <- lapply(grp_idx, function(ix) ix[good[ix]]); grp_idx <- grp_idx[vapply(grp_idx, length, 1L) >= 50]
 if (!any(grepl("^Alpine", names(grp_idx)))) stop("fewer than 50 alpine samples with reads in the BIOM")
 Prel <- X %*% Matrix::Diagonal(x = 1 / tot); rm(X)
+Prel_otu <- Prel                                                                                        # the OTU-level table is kept for the taxonomic rank test
+if (!is.null(tax) && !is.null(CFG$tax_rank)) {                                                          # optional: the analysis itself at a taxonomic rank
+  ag <- tax_agg(tax, CFG$tax_rank, rownames(Prel)); mass <- Matrix::rowSums(Prel)
+  message(sprintf("Aggregated to %s: %d taxa from %d OTUs; %.1f%% of the reads have a %s, %.1f%% %s; %.1f%% have no lineage and are left out", CFG$tax_rank, ag$n_taxa, sum(ag$assigned), 100 * sum(mass[ag$assigned & !ag$filled]) / sum(mass), CFG$tax_rank,
+                  100 * sum(mass[ag$filled]) / sum(mass), if (isTRUE(CFG$tax_fill)) "are in 'unclassified' taxa of a higher rank" else "are left out (tax_fill = FALSE)", 100 * sum(mass[!ag$assigned]) / sum(mass)))
+  Prel <- ag$Agg %*% Prel; rm(ag)
+}
 cols_of <- function(pat) unique(col_of[unlist(grp_idx[grepl(pat, names(grp_idx))])])
 m_alp <- Matrix::rowMeans(Prel[, cols_of("^Alpine"), drop = FALSE])
 m_low <- if (any(grepl("^Lowland", names(grp_idx)))) Matrix::rowMeans(Prel[, cols_of("^Lowland"), drop = FALSE]) else m_alp
+# OVERLAP OF THE OTUs BETWEEN THE ALPINE CLUSTERS: in how many clusters (studies / places) is every OTU present? All the samples of a study share their OTUs, so a filter on samples
+# does not remove the OTUs that only one study has; amplicon studies with other primers / regions / depths see different OTUs, and the among-cluster composition is then mostly "which study".
+unit_lab <- if (!is.null(tax) && !is.null(CFG$tax_rank)) paste0(CFG$tax_rank, " taxa") else "OTUs"                  # what the rows of the abundance table are, for the log
+alp_ix <- grp_idx[["Alpine|draw1"]]; cl_alp <- cluster_ids(tab[alp_ix, , drop = FALSE]); ucl_alp <- sort(unique(cl_alp)); C_alp0 <- length(ucl_alp)
+Wind_alp <- Matrix::sparseMatrix(i = seq_along(alp_ix), j = match(cl_alp, ucl_alp), x = 1, dims = c(length(alp_ix), C_alp0))
+cl_prev <- function(P) Matrix::rowSums(((P[, col_of[alp_ix], drop = FALSE] > 0) %*% Wind_alp) > 0)               # in how many alpine clusters every row of an abundance matrix is present
+pres_cl <- (Prel[, col_of[alp_ix], drop = FALSE] > 0) %*% Wind_alp
+Bp <- pres_cl > 0; n_cl_alp <- Matrix::rowSums(Bp); inter <- as.matrix(Matrix::crossprod(Bp)); sz <- Matrix::colSums(Bp); jac <- inter / (outer(sz, sz, "+") - inter)
+cls_br <- c(1, 2, 5, 10, 25, Inf); cls_lab <- c("1 cluster", "2-4", "5-9", "10-24", ">= 25"); present <- n_cl_alp >= 1
+ov <- data.frame(clusters_with_the_OTU = cls_lab, n_otus = NA_real_, share_of_otus = NA_real_, share_of_reads = NA_real_)
+for (i in seq_along(cls_lab)) { sel <- present & n_cl_alp >= cls_br[i] & n_cl_alp < cls_br[i + 1]; ov$n_otus[i] <- sum(sel); ov$share_of_otus[i] <- sum(sel) / sum(present); ov$share_of_reads[i] <- sum(m_alp[sel]) / sum(m_alp[present]) }
+message(sprintf("Overlap of the %s among the %d alpine clusters: %d are present; %.0f%% of them (%.0f%% of the reads) are in a single cluster, %.0f%% (%.0f%% of the reads) in at least 10 clusters; median Jaccard (presence) between two clusters %.3f",
+                unit_lab, C_alp0, sum(present), 100 * ov$share_of_otus[1], 100 * ov$share_of_reads[1], 100 * sum(ov$share_of_otus[4:5]), 100 * sum(ov$share_of_reads[4:5]), median(jac[upper.tri(jac)])))
+write.csv(ov, out_t("otu_overlap.csv"), row.names = FALSE)
 rank_all <- order((m_alp + m_low) / 2, decreasing = TRUE)                                              # the OTUs by mean relative abundance (alpine and lowland weighing equally)
 cols_used <- unique(col_of[unlist(grp_idx)])                                                              # the columns of the analysed samples
 n_pres_all <- Matrix::rowSums(Prel[, cols_used, drop = FALSE] > 0)                                       # in how many of the analysed samples every OTU is present
-keep_otu <- n_pres_all >= CFG$min_samples & n_pres_all / length(cols_used) >= CFG$min_prevalence
+keep_otu <- n_pres_all >= CFG$min_samples & n_pres_all / length(cols_used) >= CFG$min_prevalence & n_cl_alp >= CFG$min_clusters
 rank_all_f <- rank_all[keep_otu[rank_all]]
-message(sprintf("OTU filter: %d of %d OTUs are present in at least %d of the %d analysed samples%s", length(rank_all_f), length(rank_all), CFG$min_samples, length(cols_used),
+message(sprintf("Prevalence filter: %d of %d %s are present in at least %d of the %d analysed samples%s", length(rank_all_f), length(rank_all), unit_lab, CFG$min_samples, length(cols_used),
                 if (CFG$min_prevalence > 0) sprintf(" and in at least %.0f%% of them", 100 * CFG$min_prevalence) else ""))
 top <- rank_all_f[seq_len(min(CFG$top_otus, length(rank_all_f)))]                                       # ONE set of OTUs for both groups
-message(sprintf("Composition: %d OTUs (%.1f%% of the alpine reads, %.1f%% of the lowland reads)", length(top), 100 * sum(m_alp[top]) / sum(m_alp), 100 * sum(m_low[top]) / sum(m_low)))
+message(sprintf("Composition: %d %s (%.1f%% of the alpine reads, %.1f%% of the lowland reads)", length(top), unit_lab, 100 * sum(m_alp[top]) / sum(m_alp), 100 * sum(m_low[top]) / sum(m_low)))
 hell <- function(ix) sqrt(as.matrix(Matrix::t(Prel[top, col_of[ix], drop = FALSE])))                    # samples x OTUs, Hellinger-transformed
 
 skew <- function(x) mean(((x - mean(x)) / sd(x))^3)
@@ -498,6 +624,249 @@ print(pA, vp = viewport(layout.pos.row = 1, layout.pos.col = 1:2)); print(pB, vp
 print(pC, vp = viewport(layout.pos.row = 3, layout.pos.col = 1)); print(pD, vp = viewport(layout.pos.row = 3, layout.pos.col = 2))
 pushViewport(viewport(layout.pos.row = 4, layout.pos.col = 1:2)); grid.text(paste(cap_lines, collapse = "\n"), x = 0.01, just = "left", gp = gpar(fontsize = 9)); popViewport(2); dev.off()
 saveRDS(list(A = pA, B = pB, C = pC, D = pD), file.path(out_folder, "fig4_panels.rds"))
+## ---- 7. Predictive partition: cross-validated ridge regression ---------------------------------------------------------------------------------
+# The adjusted-R2 partition above cannot use many flexible predictors on ~150 clusters (every degree of freedom is penalised). Here the predictors are used in full under a RIDGE
+# penalty and the explained variance is the CROSS-VALIDATED R2 (leave-clusters-out): the variance of the composition that the model predicts for clusters it has not seen.
+#   * units: ALL clusters (>= 1 sample) of the group, each represented by the mean of ALL its samples; the clusters are weighted by their precision, 1 / (between-cluster
+#     variance + within-cluster variance / n samples): the weights of a random cluster intercept, so big studies do not dominate and small ones are not thrown away;
+#   * environment: every cleaned variable (cluster means), each as a natural spline with cv_env_df degrees of freedom (1 = linear); space: a spherical spline
+#     (mgcv, bs = "sos") of the cluster centres with cv_k_space basis functions; technical: log10 reads and the share of unmapped reads (natural splines, 2 df);
+#   * the response: the Hellinger composition (cluster means) summarised by its cv_pcs principal components (the variance beyond them counts as unexplained), and the three
+#     alpha metrics (freed of read depth);
+#   * models: all combinations of the sets (environment, space, technical); the partition (only, shared) is that of their cross-validated R2 (the same inclusion-exclusion);
+#   * TECHNICALLY CORRECTED composition: the composition as it would look with deep sequencing (the tech_ref_q quantile of the read depth) and no unmapped reads, i.e. the
+#     composition minus the technical effect estimated in a regression on read depth, unmapped share, the first environmental components and the broad spatial eigenvectors;
+#   * CROSS-VALIDATION: 'random' leaves out random clusters (interpolation: neighbours stay in the training set); 'spatial' leaves out whole cv_block_deg-degree blocks
+#     (extrapolation to regions that were not sampled): a smooth spatial model cannot do that, the environment can. cv_repeats repeats with other folds.
+#   * lowland: cv_lowland_draws draws of as many clusters as the alpine has, spread evenly over 5-degree cells, from the lowland replicates (all samples of the chosen
+#     clusters); the intervals of the alpine differences come from a bootstrap of the spatial blocks (the cross-validated errors are fixed: nothing is refitted).
+cv_res <- NULL
+if (isTRUE(CFG$cv_partition)) cv_res <- tryCatch({
+  message("Predictive partition (cross-validated ridge, splines, technical covariates) ...")
+  fractions_from_R <- function(Rv, nm) {                                                       # Rv: R2 of the model of every combination (named by the mask)
+    k <- length(nm); full <- 2^k - 1; bit <- 2^(seq_len(k) - 1); R <- function(mask) if (mask == 0) 0 else Rv[[as.character(mask)]]
+    bind_rows(lapply(seq_len(full), function(Tm_) { ti <- which(bitwAnd(Tm_, bit) > 0); tot <- 0
+      for (U in 0:Tm_) if (bitwAnd(U, Tm_) == U) tot <- tot + (-1)^(length(ti) - sum(bitwAnd(U, bit) > 0)) * R(bitwXor(full, U))
+      data.frame(fraction = paste(nm[ti], collapse = " + "), value = -tot, stringsAsFactors = FALSE) }))
+  }
+  cv_data <- function(ixg, otus = top, P_mat = Prel) {                                                                   # cluster-level data of a set of samples: ALL samples of every cluster
+    t_g <- tab[ixg, , drop = FALSE]; e_g <- env[ixg, , drop = FALSE]; cl <- cluster_ids(t_g)
+    ucl <- sort(unique(cl)); C <- length(ucl); N <- length(ixg); jc <- match(cl, ucl); nc <- tabulate(jc, C)
+    W <- Matrix::sparseMatrix(i = seq_len(N), j = jc, x = 1 / nc[jc], dims = c(N, C))
+    P <- as(P_mat[otus, col_of[ixg], drop = FALSE], "dgCMatrix"); Psq <- P; Psq@x <- sqrt(Psq@x)
+    Ym <- as.matrix(Matrix::t(Psq %*% W)); ss_i <- Matrix::colSums(P)                           # clusters x OTUs: the mean Hellinger vector; ss_i: the squared norm of every sample
+    gm <- colSums(nc * Ym) / N; ssb <- sum(nc * rowSums(sweep(Ym, 2, gm)^2)); ssw <- max(sum(ss_i) - sum(nc * rowSums(Ym^2)), 0)
+    w <- rep(1, C)
+    if (N > C && C > 2) { msw <- ssw / (N - C); msb <- ssb / (C - 1); n0 <- (N - sum(nc^2) / N) / (C - 1); s2u <- max((msb - msw) / n0, 1e-3 * msb); w <- 1 / (s2u + msw / nc) }
+    w <- w / mean(w)
+    reads <- log10(t_g$alpha_total_n_reads); dres <- function(y) as.numeric(resid(lm(y ~ poly(reads, 2))))
+    A <- cbind(`Richness (log10)` = dres(log10(t_g$alpha_n_otus)), Shannon = dres(t_g$alpha_shannon), `Pielou evenness` = dres(t_g$alpha_pielou))
+    Zm <- list()
+    for (nm in names(CFG$env_sets)) { cols <- unique(unlist(lapply(CFG$env_sets[[nm]], function(p) grep(p, names(e_g), value = TRUE)))); cols <- cols[vapply(e_g[cols], is.numeric, TRUE)]
+      M <- clean_env(e_g[, cols, drop = FALSE]); if (ncol(M)) Zm[[nm]] <- as.matrix(Matrix::t(W) %*% M) }
+    Tm <- NULL
+    if (all(c("unmapped_raw_counts", "total_raw_counts") %in% names(t_g))) { tv <- cbind(log10_reads = reads, unmapped = t_g$unmapped_raw_counts / t_g$total_raw_counts)
+      for (j in 1:2) tv[!is.finite(tv[, j]), j] <- median(tv[is.finite(tv[, j]), j]); Tm <- as.matrix(Matrix::t(W) %*% tv) }
+    list(Ym = Ym, Am = as.matrix(Matrix::t(W) %*% A), Zm = Zm, ll = as.matrix(Matrix::t(W) %*% cbind(t_g$Longitude, t_g$Latitude)), Tm = Tm, w = w, nc = nc, n_samples = N, clusters = ucl)
+  }
+  ns_cols <- function(x, df) { if (df <= 1 || length(unique(x)) < df + 2) return(matrix(x, ncol = 1)); tryCatch(matrix(as.numeric(splines::ns(x, df = df)), nrow = length(x)), error = function(e) matrix(x, ncol = 1)) }
+  build_X <- function(gd, env_df, k_space) {
+    E <- do.call(cbind, gd$Zm); E <- E[, apply(E, 2, sd) > 1e-8, drop = FALSE]
+    XE <- do.call(cbind, lapply(seq_len(ncol(E)), function(j) ns_cols(E[, j], env_df)))
+    ll <- gd$ll + matrix(runif(length(gd$ll), -1e-4, 1e-4), nrow(gd$ll)); k <- max(4, min(k_space, nrow(ll) - 2))
+    XS <- tryCatch(mgcv::smoothCon(eval(substitute(mgcv::s(lat, lon, bs = "sos", k = KK), list(KK = k))), data = data.frame(lat = pmin(pmax(ll[, 2], -89.9), 89.9), lon = ll[, 1]), absorb.cons = TRUE)[[1]]$X, error = function(e) NULL)
+    XT <- if (!is.null(gd$Tm)) do.call(cbind, lapply(1:2, function(j) ns_cols(gd$Tm[, j], 2))) else NULL
+    out <- list(E = XE, S = XS, T = XT); out <- out[!vapply(out, is.null, TRUE)]
+    lapply(out, function(M) { M <- M[, apply(M, 2, sd) > 1e-8, drop = FALSE]; scale(M) })
+  }
+  tech_correct <- function(gd) {                                                               # the composition at deep sequencing and no unmapped reads
+    if (is.null(gd$Tm)) return(NULL); w <- gd$w; sw <- sqrt(w); Eraw <- do.call(cbind, gd$Zm); Eraw <- Eraw[, apply(Eraw, 2, sd) > 1e-8, drop = FALSE]
+    pcE <- prcomp(Eraw, scale. = TRUE)$x[, seq_len(min(6, ncol(Eraw))), drop = FALSE]
+    ps <- tryCatch(vegan::pcnm(as.dist(geosphere::distm(gd$ll, fun = geosphere::distHaversine) / 1000))$vectors, error = function(e) NULL)
+    Xc <- cbind(gd$Tm, pcE, if (!is.null(ps)) ps[, seq_len(min(6, ncol(ps))), drop = FALSE]); Xc <- sweep(Xc, 2, colSums(w * Xc) / sum(w))
+    Yc <- sweep(gd$Ym, 2, colSums(w * gd$Ym) / sum(w)); B <- lm.fit(sw * Xc, sw * Yc)$coefficients; B[is.na(B)] <- 0
+    T0 <- c(quantile(gd$Tm[, 1], CFG$tech_ref_q), CFG$tech_ref_unmapped)
+    gd$Ym - sweep(gd$Tm, 2, T0) %*% B[1:2, , drop = FALSE]
+  }
+  make_resp <- function(Y, w, P) {                                                             # the response in the space of its first P principal components (weighted)
+    sw <- sqrt(w); Yc <- sweep(Y, 2, colSums(w * Y) / sum(w)); Ys <- sw * Yc; tot_i <- rowSums(Ys^2)
+    if (ncol(Y) > P) { ev <- eigen(tcrossprod(Ys), symmetric = TRUE); keep <- seq_len(min(P, nrow(Y) - 2)); d <- sqrt(pmax(ev$values[keep], 1e-12))
+      V <- crossprod(Ys, ev$vectors[, keep, drop = FALSE]) %*% diag(1 / d, nrow = length(d)); S <- Yc %*% V; drop_i <- pmax(tot_i - w * rowSums(S^2), 0) }
+    else { S <- Yc; drop_i <- rep(0, nrow(Y)) }
+    list(S = S, tot_i = tot_i, drop_i = drop_i)
+  }
+  ridge_multi <- function(Xtr, Ys_list, wtr, Xte) {                                            # weighted ridge; lambda by exact leave-one-out for every response
+    sw <- sqrt(wtr); xm <- colSums(wtr * Xtr) / sum(wtr); Xs <- sw * sweep(Xtr, 2, xm); sv <- svd(Xs); keep <- sv$d > 1e-8 * sv$d[1]
+    U <- sv$u[, keep, drop = FALSE]; d <- sv$d[keep]; V <- sv$v[, keep, drop = FALSE]; Xte_c <- sweep(Xte, 2, xm); U2 <- U^2
+    lapply(Ys_list, function(Yt) { ym <- colSums(wtr * Yt) / sum(wtr); Ysc <- sw * sweep(Yt, 2, ym); UtY <- crossprod(U, Ysc); best <- Inf; lam <- CFG$cv_lambdas[1]
+      for (l in CFG$cv_lambdas) { f <- d^2 / (d^2 + l); H <- as.numeric(U2 %*% f) + wtr / sum(wtr); e <- (Ysc - U %*% (f * UtY)) / (1 - H); sse <- sum(e^2); if (is.finite(sse) && sse < best) { best <- sse; lam <- l } }
+      B <- V %*% ((d / (d^2 + lam)) * UtY); sweep(Xte_c %*% B, 2, ym, "+") })
+  }
+  make_folds <- function(ll, scheme) {
+    C <- nrow(ll); K <- CFG$cv_folds; if (scheme == "random") return(sample(rep(seq_len(min(K, C)), length.out = C)))
+    cell <- paste(floor(ll[, 2] / CFG$cv_block_deg), floor(ll[, 1] / CFG$cv_block_deg)); u <- unique(cell); Kc <- min(K, length(u)); if (Kc < 3) return(NULL)
+    sample(rep(seq_len(Kc), length.out = length(u)))[match(cell, u)]
+  }
+  cv_run <- function(gd, resp, X, scheme) {                                                    # cross-validated errors of every model, for every response
+    sets <- names(X); C <- nrow(X[[1]]); w <- gd$w; masks <- seq_len(2^length(sets) - 1); bit <- 2^(seq_len(length(sets)) - 1)
+    err <- array(0, c(C, length(masks), length(resp)), dimnames = list(NULL, masks, names(resp))); ok <- TRUE
+    for (r in seq_len(CFG$cv_repeats)) { folds <- make_folds(gd$ll, scheme); if (is.null(folds)) { ok <- FALSE; break }
+      for (f in unique(folds)) { te <- which(folds == f); tr <- setdiff(seq_len(C), te)
+        for (mk in masks) { Xm <- do.call(cbind, X[sets[bitwAnd(mk, bit) > 0]])
+          out <- ridge_multi(Xm[tr, , drop = FALSE], lapply(resp, function(q) q$S[tr, , drop = FALSE]), w[tr], Xm[te, , drop = FALSE])
+          for (k in seq_along(resp)) err[te, as.character(mk), k] <- err[te, as.character(mk), k] + w[te] * rowSums((resp[[k]]$S[te, , drop = FALSE] - out[[k]])^2) / CFG$cv_repeats } } }
+    if (!ok) return(NULL)
+    for (k in seq_along(resp)) err[, , k] <- err[, , k] + resp[[k]]$drop_i                    # the variance beyond the principal components is never predicted
+    list(err = err, sets = sets, masks = masks, tot_i = lapply(resp, `[[`, "tot_i"))
+  }
+  summarise_cv <- function(cvr) {                                                              # R2 of every model and the fractions, per response
+    bind_rows(lapply(names(cvr$tot_i), function(rn) { Rv <- setNames(1 - colSums(cvr$err[, , rn, drop = FALSE][, , 1]) / sum(cvr$tot_i[[rn]]), cvr$masks); fr <- fractions_from_R(as.list(Rv), cvr$sets)
+      bind_rows(data.frame(response = rn, fraction = fr$fraction, value = fr$value, kind = "fraction"),
+                data.frame(response = rn, fraction = vapply(cvr$masks, function(mk) paste(cvr$sets[bitwAnd(mk, 2^(seq_along(cvr$sets) - 1)) > 0], collapse = " + "), ""), value = unname(Rv), kind = "model R2")) }))
+  }
+  analyse_cv_group <- function(gd, label) {
+    X <- build_X(gd, CFG$cv_env_df, CFG$cv_k_space); if (is.null(X$S) || is.null(X$E)) return(NULL)
+    resp <- c(list(Composition = make_resp(gd$Ym, gd$w, CFG$cv_pcs)), if (!is.null(gd$Tm)) list(`Composition (technically corrected)` = make_resp(tech_correct(gd), gd$w, CFG$cv_pcs)),
+              lapply(setNames(seq_len(ncol(gd$Am)), colnames(gd$Am)), function(j) make_resp(gd$Am[, j, drop = FALSE], gd$w, CFG$cv_pcs)))
+    lapply(setNames(c("random", "spatial"), c("random", "spatial")), function(sc) { cvr <- cv_run(gd, resp, X, sc); if (is.null(cvr)) NULL else list(cvr = cvr, tab = cbind(group = label, scheme = sc, summarise_cv(cvr))) })
+  }
+  # ---- the groups: the alpine (all samples of all clusters), and draws of as many lowland clusters
+  gd_alp <- cv_data(grp_idx[["Alpine|draw1"]]); C_alp <- length(gd_alp$clusters)
+  message(sprintf("  alpine: %d clusters, %d samples (all of them; precision weights %.2f to %.2f)", C_alp, gd_alp$n_samples, min(gd_alp$w), max(gd_alp$w)))
+  res_alp <- analyse_cv_group(gd_alp, "Alpine")
+  lowlist <- list(); ix_low <- unique(unlist(grp_idx[grepl("^Lowland", names(grp_idx))]))
+  if (length(ix_low) && CFG$cv_lowland_draws > 0) {
+    t_l <- tab[ix_low, , drop = FALSE]; cl_l <- cluster_ids(t_l); cen <- data.frame(cl = cl_l, lat = t_l$Latitude, lon = t_l$Longitude) %>% group_by(cl) %>% summarise(lat = mean(lat), lon = mean(lon), .groups = "drop") %>% as.data.frame()
+    cell <- paste(floor(cen$lat / 5), floor(cen$lon / 5))
+    for (d in seq_len(CFG$cv_lowland_draws)) {
+      o <- sample(nrow(cen)); rk <- ave(seq_along(o), cell[o], FUN = seq_along); ord <- o[order(rk, match(cell[o], sample(unique(cell[o]))))][seq_len(min(C_alp, nrow(cen)))]
+      gd_l <- cv_data(ix_low[cl_l %in% cen$cl[ord]]); r <- analyse_cv_group(gd_l, paste0("Lowland|draw", d)); if (!is.null(r)) lowlist[[d]] <- r
+    }
+    message(sprintf("  lowland: %d draws of %d clusters", length(lowlist), C_alp))
+  }
+  tab_all <- bind_rows(lapply(c(list(res_alp), lowlist), function(r) bind_rows(lapply(r, function(x) if (is.null(x)) NULL else x$tab))))
+  tab_all$group_main <- sub("\\|.*", "", tab_all$group)
+  # ---- block bootstrap of the alpine environment - space difference (the cross-validated errors are fixed)
+  boot_diff <- bind_rows(lapply(c("random", "spatial"), function(sc) { x <- res_alp[[sc]]; if (is.null(x)) return(NULL); cvr <- x$cvr; cell <- paste(floor(gd_alp$ll[, 2] / CFG$cv_block_deg), floor(gd_alp$ll[, 1] / CFG$cv_block_deg))
+    mE <- as.character(which(cvr$sets == "E") |> (\(i) 2^(i - 1))()); mS <- as.character(which(cvr$sets == "S") |> (\(i) 2^(i - 1))()); ub <- unique(cell); by_cell <- split(seq_along(cell), cell)
+    bind_rows(lapply(names(cvr$tot_i), function(rn) { eE <- cvr$err[, mE, rn]; eS <- cvr$err[, mS, rn]; tt <- cvr$tot_i[[rn]]
+      est <- (sum(eS) - sum(eE)) / sum(tt)                                                    # R2(E) - R2(S)
+      b <- vapply(seq_len(CFG$cv_boot), function(i) { ix <- unlist(by_cell[sample(ub, replace = TRUE)]); (sum(eS[ix]) - sum(eE[ix])) / sum(tt[ix]) }, 1)
+      data.frame(scheme = sc, response = rn, estimate = est, lo = unname(quantile(b, 0.025)), hi = unname(quantile(b, 0.975))) })) }))
+  list(tab = tab_all, boot = boot_diff, gd_alp = gd_alp, build_X = build_X, make_resp = make_resp, cv_run = cv_run, summarise_cv = summarise_cv)
+}, error = function(e) { message("Predictive partition not computed: ", conditionMessage(e)); NULL })
+
+# ---- outputs of the predictive partition
+if (!is.null(cv_res) && nrow(cv_res$tab)) {
+  ct <- cv_res$tab; ct$group_main <- sub("\\|.*", "", ct$group)
+  # the sensitivity: other numbers of spline degrees of freedom (environment) and basis functions (space); alpine, composition, random clusters left out
+  sens_cv <- tryCatch(bind_rows(lapply(CFG$cv_sens_env_df, function(df) bind_rows(lapply(CFG$cv_sens_k_space, function(k) {
+    X <- cv_res$build_X(cv_res$gd_alp, df, k); X <- X[intersect(c("E", "S"), names(X))]; resp <- list(Composition = cv_res$make_resp(cv_res$gd_alp$Ym, cv_res$gd_alp$w, CFG$cv_pcs))
+    set.seed(5); cvr <- cv_res$cv_run(cv_res$gd_alp, resp, X, "random"); R2 <- 1 - colSums(cvr$err[, , 1]) / sum(cvr$tot_i[[1]])
+    data.frame(env_df = df, k_space = k, R2_E = R2[["1"]], R2_S = R2[["2"]], R2_ES = R2[["3"]]) })))), error = function(e) { message("Sensitivity of the predictive partition not computed: ", conditionMessage(e)); NULL })
+  write.csv(ct, out_t("cv_partition.csv"), row.names = FALSE); write.csv(cv_res$boot, out_t("cv_difference_alpine.csv"), row.names = FALSE); if (!is.null(sens_cv)) write.csv(sens_cv, out_t("cv_sensitivity.csv"), row.names = FALSE)
+  # the log
+  g_mean <- function(grp, sc, rn, fr, kd) { d <- ct[ct$group_main == grp & ct$scheme == sc & ct$response == rn & ct$fraction == fr & ct$kind == kd, ]; if (nrow(d)) mean(d$value) else NA_real_ }
+  pc2 <- function(x) ifelse(is.finite(x), sprintf("%.1f%%", 100 * x), "NA")
+  for (sc in c("random", "spatial")) for (grp in unique(ct$group_main)) for (rn in c("Composition", "Composition (technically corrected)")) {
+    if (!any(ct$group_main == grp & ct$scheme == sc & ct$response == rn)) next
+    b <- cv_res$boot[cv_res$boot$scheme == sc & cv_res$boot$response == rn, ]
+    message(sprintf("  CV (%s clusters left out) | %-7s | %-35s R2: environment %s, space %s, environment + space %s%s%s", if (sc == "random") "random" else "whole blocks of", grp, rn,
+                    pc2(g_mean(grp, sc, rn, "E", "model R2")), pc2(g_mean(grp, sc, rn, "S", "model R2")), pc2(g_mean(grp, sc, rn, "E + S", "model R2")),
+                    if (!is.na(g_mean(grp, sc, rn, "E + S + T", "model R2"))) sprintf(", + technical %s (technical alone %s)", pc2(g_mean(grp, sc, rn, "E + S + T", "model R2")), pc2(g_mean(grp, sc, rn, "T", "model R2"))) else "",
+                    if (grp == "Alpine" && nrow(b)) sprintf(" | environment - space %s [%s, %s]", fmt(b$estimate), fmt(b$lo), fmt(b$hi)) else ""))
+  }
+  # the figure
+  fr_all <- ct[ct$kind == "fraction", ] %>% group_by(group_main, scheme, response, fraction) %>% summarise(value = mean(value), .groups = "drop") %>% as.data.frame()
+  cat_cv <- function(f) vapply(strsplit(f, " \\+ "), function(s) if (length(s) == 1) c(E = "Environment only", S = "Space only", T = "Technical only")[[s]] else if ("T" %in% s) "Shared with technical" else "Shared: environment + space", "")
+  fr_all$cat <- cat_cv(fr_all$fraction)
+  barA <- fr_all %>% group_by(group_main, scheme, response, cat) %>% summarise(value = sum(pmax(value, 0)), .groups = "drop") %>% as.data.frame()
+  barA <- bind_rows(barA, barA %>% group_by(group_main, scheme, response) %>% summarise(cat = "Unexplained (not predicted)", value = max(0, 1 - sum(value)), .groups = "drop"))
+  catlev <- c("Unexplained (not predicted)", "Shared with technical", "Technical only", "Space only", "Shared: environment + space", "Environment only")
+  barA$cat <- factor(barA$cat, levels = catlev); barA$response <- factor(barA$response, levels = unique(ct$response)); barA$group_main <- factor(barA$group_main, levels = c("Alpine", "Lowland"))
+  barA$scheme <- factor(c(random = "Random clusters out", spatial = "Whole blocks out")[barA$scheme], levels = c("Random clusters out", "Whole blocks out"))
+  colA <- c("Environment only" = CFG$cols[["Environment"]], "Shared: environment + space" = CFG$cols[["Shared"]], "Space only" = CFG$cols[["Space"]], "Technical only" = "#7B6FB0", "Shared with technical" = "#C9C3E0", "Unexplained (not predicted)" = CFG$cols[["Unexplained"]])
+  pA <- ggplot(barA, aes(response, value, fill = cat)) + geom_col(width = 0.75, colour = "grey40", linewidth = 0.25) +
+    geom_text(data = barA[barA$cat != "Unexplained (not predicted)" & barA$value >= 0.03, ], aes(label = sprintf("%.0f%%", 100 * value)), position = position_stack(vjust = 0.5), size = 2.7, colour = "grey10") +
+    scale_fill_manual(values = colA, breaks = rev(catlev), name = NULL) + facet_grid(scheme ~ group_main) + scale_y_continuous(labels = scales::percent, expand = expansion(mult = c(0, 0.02))) +
+    labs(tag = "A", x = NULL, y = "Cross-validated R2 (share of the among-cluster variation predicted)") + theme_fig + theme(axis.text.x = element_text(angle = 30, hjust = 1), legend.position = "top", legend.text = element_text(size = 8))
+  dl <- ct[ct$kind == "model R2" & ct$fraction %in% c("E", "S"), ] %>% tidyr::pivot_wider(id_cols = c(group, group_main, scheme, response), names_from = fraction, values_from = value) %>% mutate(diff = E - S) %>% as.data.frame()
+  lw <- dl %>% group_by(group_main, scheme, response) %>% summarise(estimate = mean(diff), lo = min(diff), hi = max(diff), .groups = "drop") %>% as.data.frame()
+  bb <- cv_res$boot; bb$group_main <- "Alpine"; lw <- bind_rows(lw[lw$group_main == "Lowland", ], bb[, c("group_main", "scheme", "response", "estimate", "lo", "hi")])
+  lw$response <- factor(lw$response, levels = rev(unique(ct$response))); lw$group_main <- factor(lw$group_main, levels = c("Alpine", "Lowland"))
+  lw$scheme <- factor(c(random = "Random clusters left out", spatial = "Whole blocks left out")[lw$scheme], levels = c("Random clusters left out", "Whole blocks left out"))
+  pB <- ggplot(lw, aes(estimate, response, colour = group_main)) + geom_vline(xintercept = 0, linetype = "dashed", colour = "grey50") +
+    geom_linerange(aes(xmin = lo, xmax = hi), position = position_dodge(width = 0.55), linewidth = 0.8) + geom_point(position = position_dodge(width = 0.55), size = 2.2) +
+    scale_colour_manual(values = c(Alpine = "#2C5F9E", Lowland = "#7A9A7E"), name = NULL) + facet_wrap(~ scheme) +
+    labs(tag = "B", x = "Cross-validated R2: environment - space (> 0: the environment predicts better)", y = NULL) + theme_fig + theme(legend.position = "top")
+  pC <- if (!is.null(sens_cv)) ggplot(sens_cv, aes(factor(k_space), factor(env_df), fill = R2_E - R2_S)) + geom_tile(colour = "white") +
+      geom_text(aes(label = sprintf("%.0f / %.0f", 100 * R2_E, 100 * R2_S)), size = 3) + scale_fill_gradient2(low = "#E69F00", mid = "white", high = "#009E73", midpoint = 0, name = "Environment\n- space") +
+      labs(tag = "C", x = "Spatial spline: basis functions", y = "Environment: spline df per variable (1 = linear)") + theme_fig + theme(panel.grid = element_blank()) else ggplot() + theme_void()
+  cap5 <- paste("Figure 5. Predictive partition of the among-cluster variation of the alpine and lowland soil microbiome (cross-validated ridge regression). Every cluster (all samples, weighted by their precision) is a unit; the environment (all CHELSA, SoilGrids and terrain variables as natural splines), space (a spherical spline of the cluster centres) and the technical covariates (read depth and the share of unmapped reads) are used in full under a ridge penalty, and the R2 is that of clusters left out of the fit.",
+                "A: the variation predicted by the environment only, by space only, by technical covariates, and shared (the responses are the composition, the composition as it would look with deep sequencing and no unmapped reads, and the alpha metrics; 'only' = the unique contribution given the other sets); top: random clusters left out (interpolation), bottom: whole blocks of ", CFG$cv_block_deg, " degrees left out (extrapolation to regions without samples); lowland: the mean of draws of as many clusters as the alpine.",
+                "B: environment minus space (cross-validated R2); alpine: 95% interval of a bootstrap of the spatial blocks, lowland: the range of the draws. C: alpine composition, random clusters left out: the R2 (% environment / % space) for other numbers of spline degrees of freedom and spatial basis functions. Negative fractions are shown as 0.")
+  cl5 <- strwrap(cap5, 160); png(file.path(out_folder, "fig5_predictive_partition.png"), width = 13, height = 12.5 + 0.17 * length(cl5), units = "in", res = 300)
+  grid.newpage(); pushViewport(viewport(layout = grid.layout(3, 2, heights = unit.c(unit(1.25, "null"), unit(1, "null"), unit(0.17 * length(cl5) + 0.2, "in")))))
+  print(pA, vp = viewport(layout.pos.row = 1, layout.pos.col = 1:2)); print(pB, vp = viewport(layout.pos.row = 2, layout.pos.col = 1)); print(pC, vp = viewport(layout.pos.row = 2, layout.pos.col = 2))
+  pushViewport(viewport(layout.pos.row = 3, layout.pos.col = 1:2)); grid.text(paste(cl5, collapse = "\n"), x = 0.01, just = "left", gp = gpar(fontsize = 9)); popViewport(2); dev.off()
+}
+
+# THE OTU-OVERLAP TEST (alpine, random clusters left out): the cross-validated R2 when only the OTUs of at least k alpine clusters are used
+otu_cv <- NULL
+if (!is.null(cv_res) && length(CFG$cv_sens_min_clusters)) otu_cv <- tryCatch(bind_rows(lapply(CFG$cv_sens_min_clusters, function(k) {
+  ok_k <- top[n_cl_alp[top] >= k]; if (length(ok_k) < 20) return(NULL)
+  gd_k <- cv_data(alp_ix, ok_k); X <- build_X(gd_k, CFG$cv_env_df, CFG$cv_k_space)
+  resp <- c(list(Composition = make_resp(gd_k$Ym, gd_k$w, CFG$cv_pcs)), if (!is.null(gd_k$Tm)) list(`Composition (technically corrected)` = make_resp(tech_correct(gd_k), gd_k$w, CFG$cv_pcs)))
+  set.seed(7); cvr <- cv_run(gd_k, resp, X, "random")
+  bind_rows(lapply(names(resp), function(rn) { R2 <- 1 - colSums(cvr$err[, , rn]) / sum(cvr$tot_i[[rn]])
+    data.frame(min_clusters = k, n_otus = length(ok_k), reads_share = sum(m_alp[ok_k]) / sum(m_alp[top]), response = rn,
+               model = vapply(cvr$masks, function(mk) paste(cvr$sets[bitwAnd(mk, 2^(seq_along(cvr$sets) - 1)) > 0], collapse = " + "), ""), R2 = unname(R2), stringsAsFactors = FALSE) })) })),
+  error = function(e) { message("OTU-overlap test not computed: ", conditionMessage(e)); NULL })
+# THE TAXONOMIC RANK TEST (alpine, random clusters left out): the cross-validated R2 of the composition aggregated to genus ... phylum, with the OTUs as the first point
+tax_cv <- NULL
+if (!is.null(cv_res) && !is.null(tax) && length(CFG$cv_tax_ranks)) tax_cv <- tryCatch(bind_rows(lapply(c("OTU", CFG$cv_tax_ranks), function(rk) {
+  m_otu <- Matrix::rowMeans(Prel_otu[, cols_of("^Alpine"), drop = FALSE])
+  if (rk == "OTU") { P_r <- Prel_otu; share <- 1 } else { ag <- tax_agg(tax, rk, rownames(Prel_otu)); P_r <- ag$Agg %*% Prel_otu; share <- sum(m_otu[ag$assigned & !ag$filled]) / sum(m_otu) }
+  oi <- which(cl_prev(P_r) >= CFG$min_clusters & Matrix::rowSums(P_r[, cols_used, drop = FALSE] > 0) >= CFG$min_samples); if (length(oi) < 20) return(NULL)               # the same prevalence filters as the analysis
+  gd_r <- cv_data(alp_ix, oi, P_r); X <- build_X(gd_r, CFG$cv_env_df, CFG$cv_k_space)
+  resp <- c(list(Composition = make_resp(gd_r$Ym, gd_r$w, CFG$cv_pcs)), if (!is.null(gd_r$Tm)) list(`Composition (technically corrected)` = make_resp(tech_correct(gd_r), gd_r$w, CFG$cv_pcs)))
+  set.seed(8); cvr <- cv_run(gd_r, resp, X, "random")
+  bind_rows(lapply(names(resp), function(rn) { R2 <- 1 - colSums(cvr$err[, , rn]) / sum(cvr$tot_i[[rn]])
+    data.frame(rank = rk, n_taxa = length(oi), reads_share = share, response = rn, model = vapply(cvr$masks, function(mk) paste(cvr$sets[bitwAnd(mk, 2^(seq_along(cvr$sets) - 1)) > 0], collapse = " + "), ""), R2 = unname(R2), stringsAsFactors = FALSE) })) })),
+  error = function(e) { message("Taxonomic rank test not computed: ", conditionMessage(e)); NULL })
+if (!is.null(tax_cv) && nrow(tax_cv)) {
+  write.csv(tax_cv, out_t("cv_taxonomic_rank_test.csv"), row.names = FALSE)
+  for (rk in unique(tax_cv$rank)) { d <- tax_cv[tax_cv$rank == rk & tax_cv$response == "Composition", ]; g <- function(m) { v <- d$R2[d$model == m]; if (length(v)) sprintf("%.1f%%", 100 * v) else "NA" }
+    message(sprintf("  Composition at the %-6s level: %6d taxa (%.0f%% of the reads) | CV R2: environment %s, space %s, technical %s, all %s", rk, d$n_taxa[1], 100 * d$reads_share[1], g("E"), g("S"), g("T"), g("E + S + T"))) }
+}
+if (!is.null(otu_cv) && nrow(otu_cv)) {
+  write.csv(otu_cv, out_t("cv_otu_overlap_test.csv"), row.names = FALSE)
+  for (k in unique(otu_cv$min_clusters)) { d <- otu_cv[otu_cv$min_clusters == k & otu_cv$response == "Composition", ]; g <- function(m) { v <- d$R2[d$model == m]; if (length(v)) sprintf("%.1f%%", 100 * v) else "NA" }
+    message(sprintf("  OTUs present in >= %2d alpine clusters: %5d OTUs (%.0f%% of the reads) | CV R2 of the composition: environment %s, space %s, technical %s, all %s", k, d$n_otus[1], 100 * d$reads_share[1], g("E"), g("S"), g("T"), g("E + S + T"))) }
+  kg <- c(1, 2, 3, 5, 10, 20, 40, 80); kg <- kg[kg <= max(n_cl_alp)]
+  curve <- data.frame(k = kg, otus = vapply(kg, function(k) sum(n_cl_alp >= k) / sum(present), 1), reads = vapply(kg, function(k) sum(m_alp[n_cl_alp >= k]) / sum(m_alp[present]), 1))
+  curve <- tidyr::pivot_longer(curve, c(otus, reads), names_to = "what", values_to = "share"); curve$what <- c(otus = "OTUs kept", reads = "reads kept")[curve$what]
+  pO1 <- ggplot(curve, aes(k, share, colour = what)) + geom_line() + geom_point() + scale_x_log10(breaks = kg) + scale_y_continuous(labels = scales::percent, limits = c(0, 1)) +
+    scale_colour_manual(values = c("OTUs kept" = "#B2182B", "reads kept" = "grey30"), name = NULL) + labs(tag = "A", x = sprintf("At least k alpine clusters (of %d) with the OTU", C_alp0), y = "Share of the alpine OTUs / reads kept") + theme_fig + theme(legend.position = "top")
+  od <- otu_cv; od$model <- factor(od$model, levels = c("E", "S", "T", "E + S + T"), labels = c("Environment", "Space", "Technical", "All three")); od <- od[!is.na(od$model), ]
+  od$response <- factor(od$response, levels = c("Composition", "Composition (technically corrected)"))
+  pO2 <- ggplot(od, aes(factor(min_clusters), R2, colour = model, group = model)) + geom_hline(yintercept = 0, colour = "grey60") + geom_line() + geom_point() + facet_wrap(~ response) +
+    geom_text(data = unique(od[, c("min_clusters", "n_otus", "response")]), aes(x = factor(min_clusters), y = Inf, label = format(n_otus, big.mark = ",")), inherit.aes = FALSE, vjust = 1.3, size = 2.6, colour = "grey35") +
+    scale_y_continuous(labels = scales::percent) + scale_colour_manual(values = c(Environment = CFG$cols[["Environment"]], Space = CFG$cols[["Space"]], Technical = "#7B6FB0", `All three` = "black"), name = NULL) +
+    labs(tag = "B", x = "Only the OTUs present in at least this many alpine clusters (numbers on top: OTUs)", y = "Cross-validated R2 of the composition") + theme_fig + theme(legend.position = "top")
+  pO3 <- NULL
+  if (!is.null(tax_cv) && nrow(tax_cv)) { td <- tax_cv; td$model <- factor(td$model, levels = c("E", "S", "T", "E + S + T"), labels = c("Environment", "Space", "Technical", "All three")); td <- td[!is.na(td$model), ]
+    td$rank <- factor(td$rank, levels = c("OTU", "genus", "family", "order", "class", "phylum")); td$response <- factor(td$response, levels = c("Composition", "Composition (technically corrected)"))
+    pO3 <- ggplot(td, aes(rank, R2, colour = model, group = model)) + geom_hline(yintercept = 0, colour = "grey60") + geom_line() + geom_point() + facet_wrap(~ response, ncol = 1) +
+      scale_y_continuous(labels = scales::percent) + scale_colour_manual(values = c(Environment = CFG$cols[["Environment"]], Space = CFG$cols[["Space"]], Technical = "#7B6FB0", `All three` = "black"), name = NULL) +
+      labs(tag = "C", x = "Taxonomic level of the composition", y = "Cross-validated R2") + theme_fig + theme(legend.position = "top") }
+  cap5b <- "Figure 5b. Is the low predictability of the composition due to the small overlap of the OTUs between studies? A: how many of the alpine OTUs, and what share of the reads, are in at least k alpine clusters (a cluster = one study / place; all its samples share their OTUs). B: the cross-validated R2 (random clusters left out, as in Figure 5A) of the environment, space and technical covariates for the composition built only from the OTUs present in at least k clusters (and for the technically corrected composition). If the R2 rises with k, the studies see different OTUs and the among-cluster composition is mostly 'which study'; the filter min_clusters (or a taxonomic rank) then follows. C (with the taxonomy file): the same R2 for the composition aggregated to coarser taxonomic levels."
+  cl5b <- strwrap(cap5b, 170); np <- if (is.null(pO3)) 2 else 3
+  png(file.path(out_folder, "fig5b_otu_overlap.png"), width = if (np == 3) 16 else 12, height = (if (np == 3) 7.2 else 5.6) + 0.17 * length(cl5b), units = "in", res = 300)
+  grid.newpage(); pushViewport(viewport(layout = grid.layout(2, np, widths = unit(if (np == 3) c(0.9, 1.5, 1) else c(1, 1.6), "null"), heights = unit.c(unit(1, "null"), unit(0.17 * length(cl5b) + 0.2, "in")))))
+  print(pO1, vp = viewport(layout.pos.row = 1, layout.pos.col = 1)); print(pO2, vp = viewport(layout.pos.row = 1, layout.pos.col = 2)); if (!is.null(pO3)) print(pO3, vp = viewport(layout.pos.row = 1, layout.pos.col = 3))
+  pushViewport(viewport(layout.pos.row = 2, layout.pos.col = 1:np)); grid.text(paste(cl5b, collapse = "\n"), x = 0.01, just = "left", gp = gpar(fontsize = 9)); popViewport(2); dev.off()
+}
 message("Done. Outputs in ", out_folder)
 writeLines(capture.output(sessionInfo()), file.path(out_folder, "sessionInfo.txt"))
 file.create(file.path(out_folder, ".done"))   # flag file for Snakemake
