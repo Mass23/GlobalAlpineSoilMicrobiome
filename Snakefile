@@ -28,7 +28,7 @@ FILTERED_BIOM = f"{DATA}/microbeatlas/otuTable_soilCurated_OTU97_nextMAPrelease_
 ALL_DATA_CSV = f"{RESULTS}/all_sampled_data.csv"
 
 # the flag files below are written by the analysis scripts themselves, inside the folder they are given
-DONE_1 = f"{RESULTS}/1_alpha_overview/fig1_panels.rds"
+DONE_1 = f"{RESULTS}/1_alpha_overview/.done"
 DONE_2 = f"{RESULTS}/2_alpha_beta_elevation_latitude/.done"
 DONE_3 = f"{RESULTS}/3_distance_decay/.done"
 DONE_4 = f"{RESULTS}/4_variance_partitioning/.done"
@@ -96,7 +96,7 @@ rule analysis_step_5:
         envfit=os.path.join(os.path.dirname(DONE_4), "tables", "envfit_summary.csv")
     shell:
         """
-        Rscript scripts/5_family_differential_abundance.R {input.table} {input.env} {input.biom} {params.out_folder} {params.envfit}
+        Rscript scripts/5_taxonomy.R {input.table} {input.env} {input.biom} {params.out_folder} {params.envfit}
         """
 
 
