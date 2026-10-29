@@ -98,7 +98,7 @@ rule analysis_step_5:
         envfit=os.path.join(os.path.dirname(DONE_4), "tables", "envfit_summary.csv")
     shell:
         """
-        Rscript scripts/5_family_differential_abundance.R {input.table} {input.env} {input.biom} {params.out_folder} {params.envfit}
+        Rscript scripts/5_taxonomy.R {input.table} {input.env} {input.biom} {params.out_folder} {params.envfit}
         """
 
 
